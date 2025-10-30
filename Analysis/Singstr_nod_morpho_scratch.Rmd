@@ -1,0 +1,758 @@
+---
+title: "Singstr_nod_morpho_scratch.rmd"
+author: "Elizabeth L. Paillan"
+date: "2025-07-20"
+date: "2023-10-18"
+output:
+  html_document: default
+  pdf_document: default
+editor_options: 
+  chunk_output_type: console
+---
+
+> Nodule traits being examined: Proportion Lobed (prop_lobe= \# of lobed nodule/ total \# nodule sample) a lower proportion means fewer lobed nodules, and a higher proportion means larger number of nodules. Nodule Prevalence (nod_prev=total \# nodule sample), the term origniates from the avt_field experiement where I was dividing the number of nodules found by plant, that is not needed since its was one plant (mostly), for this experiment its just the total nodule number.
+
+```{r Library setup, include=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(BSDA)
+library(patchwork)
+library(svglite)
+library(performance)
+library(data.table); packageVersion("data.table")
+
+```
+
+```{r Function: Anova on linear models -> pulling the summary and r2}
+lm_run<- function(model, model_name, save_path=getwd()) {
+  
+  if(!grepl("/$",save_path)){
+    save_path<-paste0(save_path,"~/GitHub/AVT_SingleInoculation/Tables/Nod_morpho_tables") }
+  
+ anova_output<- anova(model)
+ model_summary <- summary(model)
+ results_list<- list()
+
+  results_list[[paste0(model_name, "_anova")]] <- anova_output
+  results_list[[paste0(model_name, "_summary")]] <- model_summary
+  
+  anova_df<- as.data.frame(anova_output)
+  write.csv(anova_df, file=paste0(model_name,"_anova.csv"), row.names=TRUE)
+  
+  summary_df<- as.data.frame(model_summary$coefficients)
+  write.csv(summary_df, file=paste0(model_name, "_summary.csv"), row.names=TRUE)
+  
+  cat("Anova and summary for", model_name, "saved to CSV files.\n")
+
+  return(results_list)
+}
+```
+
+```{r Function: Detecting and Listing Outliers}
+detectview_outlier <- function(data, variable) {
+  outliers <- boxplot(data[[variable]], plot = FALSE)$out
+  outlier_data <- data[data[[variable]] %in% outliers, ]
+  
+  outlier_plot <- ggplot(data, aes(x = 1, y = !!rlang::sym(variable))) +
+    geom_boxplot() + 
+    geom_point(data = outlier_data, aes(x = 1, y = !!rlang::sym(variable)), color = "red") +
+    labs(x = "", y = variable, title = paste("Boxplot of", variable, "outliers"))
+  
+  return(list(plot = outlier_plot, outlier_data = outlier_data))
+}
+```
+
+```{r Data Import of Single Inoculation (ss_df), message=FALSE, warning=FALSE, paged.print=FALSE}
+## Import and tidying of Data
+setwd("~/GitHub/AVT_SingleInoculation/Analysis")
+
+plot_dir<-("../Figures/Nodule_morphology_figures/")
+table_dir<-("../Tables/Nod_morpho_tables/")
+
+ss_df<-read_csv("../Data/MasterSpreadsheet_AVT.csv")
+ss_df <- ss_df[, !colnames(ss_df) %in% "NOTES"]
+ss_df<-ss_df %>%
+    mutate(Nod_count=Nod_lobe+Nod_unlobed)%>%
+    mutate(prop_lobe=Nod_lobe/Nod_count) %>%
+    filter_at(vars(Nod_count:prop_lobe), all_vars(!is.infinite(.)))%>%
+    na.omit(ss_df)%>%
+    mutate(RS_ratio=Shootweight_g/Rootweight_g)%>%
+    mutate(Biomass_g=Rootweight_g+Shootweight_g)
+
+Mean_lobe<-ss_df %>% group_by(Strain,Variety,Source_variety,Chloro_avg)%>% summarize(lobe_mean=mean(prop_lobe, na.rm=TRUE))
+
+#### Running detectview_outlier func on biomass, chloro_avg, and prop_lobe
+Biom_outlier<-detectview_outlier(ss_df,"Biomass_g")
+Chlr_outlier<-detectview_outlier(ss_df,"Chloro_avg")
+Lobe_outlier<-detectview_outlier(ss_df,"prop_lobe")
+#### Get the outlier data by XYZ_outlier$outlier_data Biom_outlier$outlier_data
+
+#### Outliers for biomass removed: 057_S_b - 1.45g, 065_V_a - 1.467g, 104_O_d - 1.452. Prop_lobe outliers removed: 009_V_d-1,039_O_c - 1 (dead), 092_V_d - 1, 11_O_a - 1 tiny, 121_S_d- 1. Chloro_avg outliers removed: 013_S_d - 55.4, 063_S_c - 56.48, 078_S_b - 56.44
+
+
+Biomass.outliers<-c("057_S_b", "065_V_a","104_O_d")
+Prop_lobe.outliers<-c("009_V_d","039_O_c", "092_V_d", "11_O_a", "121_S_d")
+Chloro_avg.outliers<-c("013_S_d", "063_S_c", "078_S_b")
+```
+
+```{r Data Import of CFU experiment (cfu_df), message=FALSE, warning=FALSE, page.print=FALSE}
+cfu_df<-data.frame(fread("../Data/AVT_CFU_count.csv"))
+cfu_df <- cfu_df %>%
+    mutate(Comments=NULL)%>%
+    na.omit(cfu_df) %>%
+    rename(rhz_released = Lianas.rhizobia.released.per.nodule.calculation)%>%
+    mutate(Nodule.lobes=ifelse(Nodule.lobes == "More than 5","5",Nodule.lobes))%>%
+    mutate(Nodule.lobes=ifelse(Nodule.lobes == "more than 5","5",Nodule.lobes))%>%
+    mutate(lobe_occ=ifelse(Nodule.lobes ==1,0,1))
+
+#Dataframe Tidying
+cfu_df<-separate(cfu_df, Plant, into = c("Strain","Host","rep"), sep="\\.")
+cfu_df$rhz_released<-as.numeric(cfu_df$rhz_released)
+cfu_df$Nodule.area<-as.numeric(cfu_df$Nodule.area)
+cfu_df$spot.avg <- as.numeric(gsub("[^0-9.]", "", cfu_df$spot.avg))
+cfu_df$Nodule.lobes <-as.numeric(cfu_df$Nodule.lobes)
+
+#Outlier Removal
+RhzReleased_outlier<-detectview_outlier(cfu_df,"rhz_released")
+Nodule.area_outlier<-detectview_outlier(cfu_df,"Nodule.area")
+
+RhzReleased.outliers<-c("070.O.b.5","0.070.S.b.4","070.O.b.6")
+Nodule.area.outliers<-c("117.O.a.6","044.V.b.4")
+
+cfu_df<-cfu_df %>%
+  filter(!(Ind.Label %in% RhzReleased.outliers))%>%
+  filter(!(Ind.Label %in% Nodule.area.outliers))
+
+mod_cfu_df<- cfu_df %>% mutate(Nodule.lobes = as.factor(Nodule.lobes))
+mod_cfu_34 <- mod_cfu_df %>%
+  mutate(Nodule.lobes = ifelse(Nodule.lobes == "more than 5", "5+",
+                         ifelse(Nodule.lobes %in% c("3", "4"), "3-4", Nodule.lobes))) %>%
+  filter(!is.na(rhz_released) & rhz_released > 0)
+```
+
+```{r Strain Reaction norm df (str.host_mean_df) message=FALSE, warning=FALSE, paged.print=FALSE}
+ss_df<-ss_df %>%
+    filter(!(Label %in% Biomass.outliers)) %>%
+    filter(!(Label %in% Chloro_avg.outliers)) %>%
+    filter(!(Label %in% Prop_lobe.outliers))
+
+#Taking the mean across reps, strain, and variety to reduce noise
+str.host_mean_df <- ss_df %>%
+  group_by(Strain,Variety)%>%
+  summarise(mean_prop_lobe=mean(prop_lobe,na.rm=TRUE), 
+            mean_chloro_avg=mean(Chloro_avg, na.rm=TRUE),
+            mean_biomass_g=mean(Biomass_g, na.rm=TRUE),
+            mean_nod_num=mean(Nod_count, na.rm=TRUE),
+            mean_agbiomass_g=mean(Shootweight_g, na.rm=TRUE),
+            mean_rs=mean(RS_ratio, na.rm=TRUE))
+```
+
+##Chlorophyll content NOT USED
+
+```{r Chlr content with Prop_lobe}
+### Prop,lobe, variety, strain, and rep come of as significant; variety:strain interaction doesnt appear significant. I'm not sure what is more important prop_lobe as a predictor of chlr content, or chlr content as a predictor of prop_lobe. Both models shows significance of their predictor, and both show a positive correlated relationship.
+#### 4-20-24: After chatting with Pat, he recommended looking at the outliers in Biomass that could clarify what i'm seeing.
+##Suggested models by Liana on 4/23/24 - UPDATE: after evaluating all the models we discussed I decided to go with biomass~prop_lobe chloro~mean_proplobed*Variety	Chloro~mean_nodule#*Variety
+
+
+##Testing out some non-linear models, GAM, polynomial
+##SPLINE model only explains 53.4% of deviance explained & 30.7% of the response is explained by the predictors in model
+spline_chlr<- gam(mean_chloro_avg~mean_prop_lobe+Strain, data=str.host_mean_df)
+   summary(spline_chlr)
+
+##GAM model explains 55.1% variance & 32.5% of the response is explained by the predictors in model
+   spline_propchlr<- gam(mean_prop_lobe~mean_chloro_avg+Strain, data=str.host_mean_df)
+summary(spline_propchlr)
+
+##Liana Suggested models
+chlr.ps_lm<-lm(mean_chloro_avg~mean_prop_lobe+Strain, data=str.host_mean_df)
+a.chlr.ps_lm<-anova(chlr.ps_lm)
+summary(a.chlr.ps_lm)
+a.chlr.ps_lm
+sum_chlr.ps_lm<-summary(chlr.ps_lm)
+r2_chlr.ps_lm<-sum_chlr.ps_lm$r.squared
+
+chlr.pvs_lm<-lm(mean_chloro_avg~mean_prop_lobe*Variety+Strain, data=str.host_mean_df)
+a.chlr.pvs_lm<-anova(chlr.pvs_lm)
+summary(a.chlr.pvs_lm)
+chlr.pvs_lm
+sum_chlr.pvs_lm<-summary(chlr.pvs_lm)
+r2_chlr.pvs_lm<-sum_chlr.pvs_lm$r.squared
+
+chlr.nvs_lm<-lm(mean_chloro_avg~mean_nod_num*Variety+Strain, data=str.host_mean_df)
+a.chlr.nvs_lm<-anova(chlr.nvs_lm)
+summary(a.chlr.nvs_lm)
+a.chlr.nvs_lm
+sum_chlr.nvs_lm<-summary(chlr.nvs_lm)
+r2_chlr.nvs_lm<-sum_chlr.nvs_lm$r.squared
+
+#Combined & Exported Anova's and R2's anovas to a CSV file to determine which model is better fit
+Combined_chlr_anovas<- rbind(a.chlr.ps_lm,a.chlr.pvs_lm, a.chlr.nvs_lm)
+#write.csv(Combined_chlr_anovas, "./Tables/Nod_morpho_tables/combined_chlr_avovas.csv")
+Combined_chlr_anovas
+
+Combined_chlr_r2<-rbind(r2_chlr.ps_lm,r2_chlr.pvs_lm,r2_chlr.nvs_lm)
+#write.csv(Combined_chlr_r2, "./Tables/Nod_morpho_tables/combined_chlr_rs.csv")
+Combined_chlr_r2
+
+#Non-parametric attempts
+ 
+##Nonliner transformations - tried square roots, inverse, and log and all resulted in a large amount of unexplained variability. 
+  
+ggplot(str.host_mean_df, aes(y=mean_chloro_avg, x=mean_prop_lobe, color= Variety))+
+  geom_point()+
+  geom_smooth(method="gam")+
+  ggtitle("Mean Chlorophyll average pred Mean proportion lobed")
+
+ggplot(ss_df, aes(y=Chloro_avg, x=prop_lobe, color=Variety))+
+  geom_point()+
+  geom_smooth(method="loess", se= TRUE)+
+  ggtitle("Raw Chlorophyll avereage pred Proportion lobed")
+
+ggplot(str.host_mean_df, aes(y=mean_chloro_avg, x=mean_prop_lobe, color= Variety))+
+  geom_point()+
+  geom_smooth(method="gam")+
+  labs(x= "Average Proportion of Branched Nodules", y= "Average Host Chlorophyll Content")
+
+```
+
+## QUESTION 3 Does the proportion of branched nodules correlate to biomass within the host plant?
+
+```{r Biomass questions}
+### Suggested models from Liana 4/24 - 2)Biomass~mean_proplobed*Variety	3)Biomass~mean_nodule#*Variety
+### Biomass correlation with prop_lobe - Unaveraged
+bm_lm<-lm(Biomass_g~prop_lobe*Variety+Strain, data=ss_df)
+bm_lm.results<-lm_run(bm_lm, "bm_lm")
+print(bm_lm.results)
+
+### Mean Biomass~ Mean lobe - WIll USE ON NFIX POSTER
+bm.pvs_lm<-lm(mean_biomass_g~mean_prop_lobe*Variety+Strain,data=str.host_mean_df)
+bm.pvs_lm.results<-lm_run(bm.pvs_lm, "bm.pvs")
+print(bm.pvs_lm.results)
+
+### Mean biomass ~ Mean nodule #
+bm.nvs_lm<-lm(mean_biomass_g~mean_nod_num*Variety+Strain, data=str.host_mean_df)
+bm.nvs_lm.results<-lm_run(bm.nvs_lm, "bm.vs")
+print(bm.nvs_lm.results)
+
+
+### Plots
+#### Raw plot
+ggplot(ss_df, aes(y=prop_lobe, x= Biomass_g, color=Variety))+
+  geom_point()+
+  geom_smooth(method="glm")
+
+#### Mean biomass_prop_lobe
+ggplot(str.host_mean_df, aes(y=mean_biomass_g, x=mean_prop_lobe, color= Variety))+
+  geom_point()+
+  geom_smooth(method="lm")+
+  ggtitle("Mean Biomass average pred Mean proportion lobed")
+
+#### Mean biomass mean nod number
+ggplot(str.host_mean_df, aes(y=mean_biomass_g, x=mean_nod_num, color= Variety))+
+  geom_point()+
+  geom_smooth(method="lm")+
+  ggtitle("Mean Biomass average pred Mean Nodule number")
+
+### Shoot:root ratio correlction with prop_lobe? - Did not use for Nitrogen Fixation Poster, originally tested root:shoot will test shoot:root after recieive comments from Liana
+SR_lm<- lm(mean_rs~mean_prop_lobe, data=str.host_mean_df)
+RS_lm<-lm(RS_ratio~prop_lobe+Variety*Strain+Rep, data=ss_df)
+a.RS_lm<-anova(RS_lm)
+a.RS_lm
+
+ggplot(str.host_mean_df, aes(y=mean_rs, x= mean_prop_lobe, color=Variety))+
+  geom_point()+
+  scale_y_log10()+
+  stat_smooth()
+
+ggplot(ss_df, aes(y=RS_ratio, x= prop_lobe, color=Variety))+
+  geom_point()+
+  scale_y_log10()+
+  stat_smooth()
+
+Variety_colors <-c("O"="#471323", "S"="#ADB9E3", "V"="#FCB0B3")
+
+
+##Emphasis on host benefit with aboveground biomass
+svg("../Figures/Nodule_morphology_figures/AGBiomass_branched.svg", width=3, height=3)
+#ggplot(str.host_mean_df, aes(x=mean_prop_lobe, y=mean_agbiomass_g, color=Variety))+
+  geom_point(alpha=0.6)+
+  stat_smooth(method="lm",se = FALSE)+
+  #xlim(0,1)+
+  labs(x="Mean Proportion of Branched Nodules", y="Mean Host Above Ground Biomass (g)",
+       color= "Host Variety")+
+  scale_color_manual(values =c("O"="#471323", "S"="#ADB9E3", "V"="#FCB0B3"))+
+  #guides(color="none")+
+  theme_bw()+
+  theme(plot.title = element_text(face = "bold", hjust = 0.5, size = 14))+
+  theme(panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"))+
+  theme(legend.position="top")
+dev.off()
+
+###Model for aboveground biomass
+abm.pvs_lm<-lm(mean_agbiomass_g~mean_prop_lobe*Strain+Variety,data=str.host_mean_df)
+a.abm.pvs_lm<-anova(abm.pvs_lm)
+summary(a.abm.pvs_lm)
+a.abm.pvs_lm
+sum_abm.pvs_lm<-summary(abm.pvs_lm)
+r2_abm.pvs_lm<-sum_abm.pvs_lm$r.squared
+
+##Root to shoot ratio meeting comment:We recommend sticking with total biomass and adding in root-to-shoot ratio as a metric of disproportionate investment in shoots over roots [plot the two together]
+
+
+```
+
+## QUESTION 2 Does the host plant adjust resource allocation to nodules based on the total amount of nodules produced?
+
+```{r Proportion of Branched Nodules predicted by Total Nodule Count}
+###Across all varieties, as the host produces/invests less in nodule count, the higher proportion of lobed nodules found.
+nod_tr_lm<-lm(prop_lobe~Nod_count*Variety+Rep,data=ss_df)
+nod_tr.results<-lm_run(nod_tr_lm, "nod_tr")
+print(nod_tr.results)
+
+nod_prev.count_glm<-glm(prop_lobe~Nod_count*Variety*Strain+Rep, data=ss_df, family= binomial(link="logit"))
+nod_prev.count_glm.results<-lm_run(nod_prev.count_glm, "GLM_nod_prev",save_path="../Tables/Nod_morpho_tables/")
+print(nod_prev.count_glm.results)
+
+##Testing the fitting of the GLM, also now called nod_prev.count_glm npc_glm cause i'm getting lazy. My deviance test and the pearson tests come back as a P value of 1 meaning the model fits nicely? The Q-Q plot shows random scattering away from the 0 line, and no trend meaning it fits!
+dev.nod_prev.count_glm <-pchisq(deviance(nod_prev.count_glm), df.residual(nod_prev.count_glm),lower.tail= FALSE)
+print(paste("Deviance Goodness-of-Fit Test p-value:", dev.nod_prev.count_glm))
+pear.nod_prev.count_glm <-pchisq(sum(residuals(nod_prev.count_glm, type="pearson")^2), df.residual(nod_prev.count_glm), lower.tail=FALSE)
+print(paste("Pearson Goodness-of-Fit Test p-value:", pear.nod_prev.count_glm))
+
+npc_glm.residuals<- residuals(nod_prev.count_glm, type="deviance")
+plot(x = fitted(nod_prev.count_glm), y = npc_glm.residuals,
+     main = "Residual Q-Q Plot", xlab = "Fitted values", ylab = "Deviance Residuals",
+     abline(h=0,col="green"))
+
+##How would I display the model fits? - Used this on my NFix poster
+
+
+ggplot(ss_df, aes(x=prop_lobe, y=Nod_count,color=Variety))+
+  geom_point(alpha=0.6)+
+  stat_smooth(method="gam",se = FALSE)+
+  #ylim(0,1)+
+  #labs(x="Total Nodule Count", y="Proportion of Branched Nodules",
+       #color= "Host Variety")+
+  theme_bw()+
+  theme(plot.title = element_text(face = "bold", hjust = 0.5, size = 14))+
+  theme(panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"))
+
+## Liana suggested using a non-proportion as a response variable
+nod_tr_lm<-lm(prop_lobe~Nod_count*Variety+Rep,data=ss_df)
+nod_tr_lm.results<-lm_run(nod_tr_lm, "nod_tr")
+print(nod_tr_lm.results)
+
+```
+
+# QUESTION 1 Does the area of a nodule correlate with the amount of rhizobial colony-forming units (CFU)?
+
+```{r microbe benefit question}
+### Which strains have enough CFU data. - 117.S.d is the only d rep?
+ggplot(cfu_df, aes(x= rep , y= rhz_released, color=Host))+
+  geom_point()+
+  scale_y_log10()+
+  facet_wrap(~ Strain)
+
+ggplot(cfu_df, aes(x= Nodule , y= rhz_released, color=Host))+
+  geom_point()+
+  scale_y_log10()+
+  facet_wrap(~ Strain)
+
+NotEnoughdata_cfu<-c("117.S.d.2","117.S.d.3","117.S.d.5","117.S.d.6")
+cfu_df<-cfu_df %>%
+  filter(!(Ind.Label %in% NotEnoughdata_cfu))
+
+### Is CFU correlated with the proportion_lobed?
+cfu_pl_lm<- lm(rhz_released~Nodule.area*Strain+Host, data= cfu_df)
+cfu_pl_lm.results<-lm_run(cfu_pl_lm, "cfu_pl_lm", save_path="../Tables/Nod_morpho_tables/")
+print(cfu_pl_lm.results)
+
+ggplot(cfu_df, aes(x=Nodule.area, y=rhz_released, color=Host))+
+  geom_point()+
+  scale_y_log10()+
+    geom_smooth(method = NULL, se=TRUE)+
+  ggtitle("CFU pred Nodule area")+
+  facet_wrap(~Host)
+
+
+##Because there's a 3-way interaction; Liana suggested separating the CFU data by host. I'm going to attempt to write a function so I can run this analysis quickly
+O_cfu_df <- cfu_df[cfu_df$Host =="O",]
+S_cfu_df <- cfu_df[cfu_df$Host =="S",]
+V_cfu_df <- cfu_df[cfu_df$Host =="V",]
+
+cfu_model<-function(data){
+  model <- lm(rhz_released ~ asymptote * (1 - exp(-rate * Nodule.area)), 
+               data = cfu_df_clean,
+               start = list(asymptote = max(cfu_df_clean$rhz_released), rate = 0.1))
+  return(model)}
+
+run_cfu_model <- function(O_cfu_df,S_cfu_df,V_cfu_df){
+    O_cfu_m <- cfu_model(O_cfu_df)
+    S_cfu_m <- cfu_model(S_cfu_df)
+    V_cfu_m <- cfu_model(V_cfu_df)
+
+return(list(O_cfu = list(model = O_cfu_m),
+              S_cfu = list(model = S_cfu_m),
+              V_cfu = list(model = V_cfu_m)))
+  
+}
+
+##After chatting with Liana on 4/23/24 I will examine the occurrence of cfu~branched as 0-no 1-yes, cfu~# of lobes (as a numerical)
+
+cfu_area.lm<-lm(rhz_released~Nodule.area*Host, data=cfu_df)
+cfu_area.lm.results<-lm_run(cfu_area.lm, "cfu_area.lm")
+print(cfu_area.lm.results)
+
+cfu_pl_lm<- lm(rhz_released~Nodule.area*Strain+Host, data= cfu_df)
+cfu_pl_lm.results<-lm_run(cfu_pl_lm, "cfu_pl_lm")
+print(cfu_pl_lm.results)
+
+cfu_branch<-lm(rhz_released~lobe_occ*Host, data=cfu_df)
+cfu_branch.results<-lm_run(cfu_branch,"cfu_branch")
+print(cfu_branch.results)
+
+cfu_lobe<-lmer(rhz_released~Nodule.area*Strain+(1|Host)+(1|rep), data=cfu_df)
+cfu_lobe.results<-lm_run(cfu_lobe, "cfu_lobe")
+print(cfu_lobe.results)
+
+
+#New questions from Liana as of 9/20/24
+#Are more branched nodules larger
+lg_branch<-lm(Nodule.area~Nodule.lobes*Host+Strain+rep, data=cfu_df)
+lg_branch.results<-lm_run(lg_branch,"lg_branch")
+print(lg_branch.results)
+
+
+
+
+#Does rhizobial fitness increase with nodule branches
+
+
+##Trying to model that logarithmic curve
+
+linear_model <- lm(log10(rhz_released) ~ Nodule.area, data = cfu_df)
+
+# Extract coefficients: Intercept gives log(a), slope gives b
+start_b <- coef(linear_model)[2]
+start_a <- 10^coef(linear_model)[1]  # Exponentiate the intercept to get a
+
+# Fit the nls model using these starting values
+viable_surfa <- nls(log10(rhz_released) ~ a * exp(b * Nodule.area), 
+                    data = cfu_df, 
+                    start = list(a = start_a, b = start_b))
+
+summary(viable_surfa)
+
+a<-8.24
+b<- 5.42
+viable_surfa<-nls(log10(rhz_released)~ SSexp(Nodule.area, a, b), data=cfu_df, start=list(a=8.24, b=5.42))
+summary(viable_surfa)
+
+
+# Linear regression on the log-transformed data to estimate starting values
+linear_model <- lm(log10(rhz_released) ~ Nodule.area+Host+Strain+rep, data = cfu_df)
+
+# Extract coefficients: Intercept gives log(a), slope gives b
+start_b <- coef(linear_model)[2]
+start_a <- 10^coef(linear_model)[1]  # Exponentiate the intercept to get a
+
+# Show the estimated starting values
+start_a
+start_b
+
+# Fit the nls model using the estimated starting values
+viable_surfa <- nls(log10(rhz_released) ~ a * exp(b * Nodule.area), 
+                    data = cfu_df, 
+                    start = list(a = start_a, b = start_b))
+
+summary(viable_surfa)
+
+
+
+```
+
+```{r Biomass different per nodule surface area}
+cfu_df<-cfu_df %>%
+  mutate(rateCFU=rhz_released/Nodule.area)
+
+ggplot(cfu_df, aes(x=Nodule.area, y=rateCFU, color=Host))+
+  geom_point()+
+  scale_y_log10()+
+  scale_color_manual(values =c("O"="#471323", "S"="#ADB9E3", "V"="#FCB0B3"))+
+    geom_smooth(method ="loess", se=TRUE)+
+  labs(x= "Nodule Area", y="rateCFU")+
+  guides(color="none")+
+  theme_bw()+
+  theme(plot.title = element_text(face = "bold", hjust = 0.5, size = 14))+
+  theme(panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"))
+```
+
+#Mariale taking a look at proportion of lobed and unlobed nodules - 2024
+
+```{r}
+#### 4-4-24; ELP: Just modified the data location, and dataframe names to get this RMD to knit.
+#I am using the original Dataframe
+AVTSingleStrain <- read_csv("../Data/MasterSpreadsheet_AVT.csv")
+AVTSingleStrain <- AVTSingleStrain %>% mutate(Treatment = case_when(Strain < "097" ~ "R", 
+                                                                    Strain >= "097" & Strain <= "123" ~ "P",
+                                                                    Strain == "MIX" ~ "MIX",
+                                                                    Strain == "UNI" ~ "UNI",
+                                                                    Strain == "EXC" ~"EXC",
+                                                                    Strain == "NIG" ~ "NIG",
+                                                                    Strain == "MC2" ~ "MC2"))
+#View(AVTSingleStrain)
+
+
+AVTSingleStrain <- AVTSingleStrain %>% 
+  mutate(Total_Nodules = rowSums(across(c('Nod_lobe', 'Nod_unlobed')))) %>% ##Sum to create the new column with the total nodules
+  mutate(Variety_label = case_when(Variety == "O" ~ "Oneida", Variety == "S" ~ "SW401", Variety =="V" ~ "Vernal")) %>% ##Long name to make graphs more understandable. 
+  mutate(Prop_lob = Nod_lobe/Total_Nodules)
+
+#View(AVTSingleStrain_RPM)
+  
+
+AVTSingleStrain_RPM_sum <- AVTSingleStrain %>% group_by(Strain, Variety, Variety_label) %>%
+  summarize(ave_Nod = mean(Total_Nodules, na.rm =TRUE))
+
+
+ggplot(AVTSingleStrain_RPM_sum, aes(x=Variety_label, y = ave_Nod, fill=Variety_label))+
+  geom_boxplot(outlier.shape=NA, na.rm = TRUE, coef=0)+##plots the box and gets rid of the extra line
+  geom_jitter()+
+  theme_bw()+
+  ggtitle("Total Nodules")+
+  labs(x="Alfalfa variety", y="Number of nodules")+
+  theme(plot.title = element_text(face = "bold", hjust = 0.5, size = 14))+
+  theme(plot.title = element_text(face = "bold", hjust = 0.5, size = 10))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"))
+  
+
+#View(AVTSingleStrain_RPM)
+  
+aov1<- aov(ave_Nod~Variety, AVTSingleStrain_RPM_sum)
+summary(aov1)
+TukeyHSD(aov1) # Differences between O and V and S and V. 
+
+##Proportion of Lobbed/NonLobbed
+
+AVTSingleStrain_RPM_sum_prop <- AVTSingleStrain %>% group_by(Strain, Variety, Variety_label) %>%
+  summarize(ave_PropNod = mean(Prop_lob, na.rm =TRUE))
+#View(AVTSingleStrain_RPM_sum_prop)
+
+ggplot(AVTSingleStrain_RPM_sum_prop, aes(x=Variety_label, y = ave_PropNod, fill=Variety_label))+
+  geom_boxplot(outlier.shape=NA, na.rm = TRUE, coef=0)+##plots the box and gets rid of the extra line
+  geom_jitter()+
+  theme_bw()+
+  ggtitle("Proportion lobed nodules")+
+  labs(x="Alfalfa variety", y="Proportion of lobbed nodules")+
+  theme(plot.title = element_text(face = "bold", hjust = 0.5, size = 14))+
+  theme(plot.title = element_text(face = "bold", hjust = 0.5, size = 10))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank(), axis.line = element_line(colour = "black"))
+
+aov2<- aov(ave_PropNod ~ Variety, AVTSingleStrain_RPM_sum_prop)
+summary(aov2) #Not significant difference because of variety
+
+
+```
+
+# Using a nls model for y=log10(# of rhizobial released) and x=nodule surface area parsed by number of nodule branches and seperated by host variety in the cfu dataset
+```{r}
+
+
+cfu_df[is.infinite(log10(cfu_df$rhz_released)) | 
+       is.na(log10(cfu_df$rhz_released)), ]
+
+#Removing only infinity value row 65
+cfu_df_clean <- subset(cfu_df, rhz_released > 0 & !is.na(rhz_released))
+
+nls_model <- nls(
+  log10(rhz_released) ~ a + b * Nodule.area + c * (Nodule.area^2),
+  data = cfu_df_clean,
+  start = list(a = 0.5, b = 0.5, c = 0.01)
+)
+
+cfu_df_clean <- subset(cfu_df, rhz_released > 0 & !is.na(rhz_released))
+cfu_df_clean$log_rhz <- log10(cfu_df_clean$rhz_released)
+
+
+model_base <- nls(
+  log_rhz ~ a + b * Nodule.area + c * (Nodule.area^2),
+  data = cfu_df_clean,
+  start = list(a = mean(cfu_df_clean$log_rhz), b = 0, c = 0)
+)
+
+model_branches <- nls(
+  log_rhz ~ a + b * Nodule.area + c * (Nodule.area^2) + d * Nodule.lobes,
+  data = cfu_df_clean,
+  start = list(a = mean(cfu_df_clean$log_rhz), b = 0, c = 0, d = 0)
+)
+
+AIC(model_base, model_branches)
+
+anova(model_base, model_branches)
+
+newdata <- data.frame(
+  Nodule.area = seq(min(cfu_df_clean$Nodule.area),
+                    max(cfu_df_clean$Nodule.area),
+                    length.out = 100),
+  Nodule.lobes = mean(cfu_df_clean$Nodule.lobes)
+)
+
+# Predict from both models
+newdata$pred_base <- predict(model_base, newdata)
+newdata$pred_branches <- predict(model_branches, newdata)
+cfu_df_clean$fitted_base <- fitted(model_base)
+cfu_df_clean$residual_base <- residuals(model_base)
+
+residuals_long <- cfu_df_clean %>%
+  select(Nodule.area, log_rhz, residual_base, residual_branches) %>%
+  pivot_longer(cols = starts_with("residual"),
+               names_to = "Model",
+               values_to = "Residuals") %>%
+  mutate(Model = ifelse(Model == "residual_base", "Base Model", "With Lobes"))
+
+
+#ver 1
+ggplot(cfu_df_clean, aes(x = Nodule.area, y = log_rhz)) +
+  geom_point(alpha = 0.5) +
+  geom_line(data = newdata, aes(y = pred_base, color = "Base Model"), size = 1) +
+  geom_line(data = newdata, aes(y = pred_branches, color = "With Lobes"), size = 1) +
+  labs(title = "Quadratic Model Comparison",
+       x = "Nodule Area",
+       y = "log10(Rhizobia Released)",
+       color = "Model") +
+  theme_minimal()
+
+
+# Prediction grid for curves
+newdata <- expand.grid(
+  Nodule.area = seq(min(cfu_df_clean$Nodule.area),
+                    max(cfu_df_clean$Nodule.area),
+                    length.out = 100),
+  Nodule.lobes = unique(cfu_df_clean$Nodule.lobes)
+)
+newdata$pred_branches <- predict(model_branches, newdata)
+
+# ver 2
+ggplot() +
+  geom_point(data = cfu_df_clean, aes(x = Nodule.area, y = log_rhz),
+             alpha = 0.5) +
+  geom_line(data = newdata, aes(x = Nodule.area, y = pred_branches,
+                                group = Nodule.lobes,
+                                color = factor(Nodule.lobes)), size = 1) +
+  geom_segment(data = cfu_df_clean,
+               aes(x = Nodule.area, xend = Nodule.area,
+                   y = fitted_branches, yend = log_rhz),
+               alpha = 0.4, linetype = "dotted") +
+  labs(title = "Quadratic Model with Residuals",
+       x = "Nodule Area",
+       y = "log10(Rhizobia Released)",
+       color = "Number of Lobes") +
+  scale_color_manual(values = c("1"="#273E47", "2"="#BAA5FF", "3-4"="#6E9887", "5"="#A5402D"), labels= c("1","2","3-4","5+"))+
+  guides(color = guide_legend("Number of Nodule Branches", override.aes = list(shape = c(21,22,24))),
+    shape = "none") +
+  theme_minimal()
+
+#Ver 3
+cfu_df_clean$Nodule.lobes <- factor(
+  cfu_df_clean$Nodule.lobes,
+  levels = c("1", "2", "3-4", "5+"),
+  ordered = TRUE
+)
+
+model_branches <- nls(
+  log_rhz ~ a + b * Nodule.area + c * (Nodule.area^2) +
+            d1 * (Nodule.lobes == "2") +
+            d2 * (Nodule.lobes == "3-4") +
+            d3 * (Nodule.lobes == "5+"),
+  data = cfu_df_clean,
+  start = list(a = mean(cfu_df_clean$log_rhz), b = 0, c = 0,
+               d1 = 0, d2 = 0, d3 = 0)
+)
+
+newdata <- expand.grid(
+  Nodule.area = seq(min(cfu_df_clean$Nodule.area),
+                    max(cfu_df_clean$Nodule.area),
+                    length.out = 100),
+  Nodule.lobes = factor(c("1", "2", "3-4", "5+"),
+                        levels = c("1", "2", "3-4", "5+"),
+                        ordered = TRUE)
+)
+newdata$pred_branches <- predict(model_branches, newdata)
+
+newdata$pred_branches <- predict(model_branches, newdata)
+
+ggplot(cfu_df_clean, aes(x = Nodule.area, y = log_rhz, color = Nodule.lobes)) +
+  geom_point(alpha = 0.5) +
+  geom_line(data = newdata, aes(y = pred_branches, group = Nodule.lobes),
+            size = 1) +
+  labs(title = "Quadratic Model by Number of Lobes",
+       x = "Nodule Area",
+       y = "log10(Rhizobia Released)",
+       color = "Number of Lobes") +
+  theme_minimal()
+
+```
+
+```{r}
+library(nlme)
+
+# Make sure Nodule.lobes is a factor
+cfu_df_clean$Nodule.lobes <- factor(
+  cfu_df_clean$Nodule.lobes,
+  levels = c("1", "2", "3-4", "5+"),
+  ordered = TRUE
+)
+
+# Base quadratic model
+model_base <- gnls(
+  log_rhz ~ a + b * Nodule.area + c * (Nodule.area^2),
+  data = cfu_df_clean,
+  start = c(a = mean(cfu_df_clean$log_rhz), b = 0, c = 0)
+)
+
+# Quadratic model WITH categorical lobes effect
+model_branches <- gnls(
+  log_rhz ~ a + b * Nodule.area + c * (Nodule.area^2) +
+            d2 * (Nodule.lobes == "2") +
+            d3 * (Nodule.lobes == "3-4") +
+            d4 * (Nodule.lobes == "5+"),
+  data = cfu_df_clean,
+  start = c(a = mean(cfu_df_clean$log_rhz), b = 0, c = 0,
+            d2 = 0, d3 = 0, d4 = 0)
+)
+
+AIC(model_base, model_branches)
+anova(model_base, model_branches)
+
+newdata <- expand.grid(
+  Nodule.area = seq(min(cfu_df_clean$Nodule.area),
+                    max(cfu_df_clean$Nodule.area),
+                    length.out = 100),
+  Nodule.lobes = factor(c("1", "2", "3-4", "5+"),
+                        levels = c("1", "2", "3-4", "5+"),
+                        ordered = TRUE)
+)
+
+newdata$pred_branches <- predict(model_branches, newdata)
+
+library(ggplot2)
+
+ggplot(cfu_df_clean, aes(x = Nodule.area, y = log_rhz, color = Nodule.lobes)) +
+  geom_point(alpha = 0.5) +
+  geom_line(data = newdata,
+            aes(y = pred_branches, group = Nodule.lobes),
+            size = 1) +
+  labs(title = "Quadratic Model with Nodule Lobes Categories",
+       x = "Nodule Area",
+       y = "log10(Rhizobia Released)",
+       color = "Number of Lobes") +
+  theme_minimal()
+
+
+```

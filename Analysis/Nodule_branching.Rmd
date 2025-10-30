@@ -1,0 +1,410 @@
+---
+title: "Nodule branching, size, and symbiosis outcomes are shaped by natural genetic variation in rhizobial bacteria and alfalfa hosts "
+author: "Elizabeth Leslie Paillan - elpailla@ncsu.edu & Liana Burghardt - liana.burghardt@psu.edu"
+date: "2025-10-25"
+output:
+  html_document: default
+  pdf_document: default
+editor_options: 
+  chunk_output_type: console
+---
+
+Nodule traits being examined: Proportion Lobed (prop_lobe= \# of lobed nodule/ total \# nodule sample) a lower proportion means fewer lobed nodules, and a higher proportion means larger number of nodules. Nodule Prevalence (nod_prev=total \# nodule sample), the term origniates from the avt_field experiement where I was dividing the number of nodules found by plant, that is not needed since its was one plant (mostly), for this experiment its just the total nodule number.
+
+#Libraries Used
+
+```{r Library setup, echo = TRUE, warning=FALSE}
+library(tidyverse); packageVersion("tidyverse")
+library(BSDA); packageVersion("BSDA")
+library(patchwork); packageVersion("patchwork")
+library(svglite); packageVersion("svglite")
+library(performance); packageVersion("performance")
+library(data.table); packageVersion("data.table")
+set.seed(100)
+```
+
+```{r GGplot theme, include=FALSE}
+#Below is the general theme used for all ggplot2 figures
+plot_theme<- function(){
+  theme_bw()+
+    theme(
+      legend.title = element_text(size = 18, face = "bold"),
+      legend.text  = element_text(size = 18, face = "bold"),
+      axis.title = element_text(size=18, face="bold"),
+      axis.text = element_text(size=17),
+      strip.text = element_text(size=16, face = "bold"),
+      panel.grid.minor = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.background = element_blank(),
+      axis.line = element_line(linewidth = 1.05,color = "black")
+    )
+    }
+
+#Changing host variety names to their full names & add designated colorscheme
+host_labels <- c(O = "Onedia", S = "SW402", V = "Vernal")
+common_layers <- list(
+  scale_color_manual(values = c("O" = "#471323", "S" = "#ADB9E3", "V" = "#FCB0B3")),
+  scale_shape_manual(values = c(0,1,2,5,4,3,6,8),
+                     labels = c("1","2","3","4","5","6","7","8")),
+  guides(colour = guide_legend(override.aes = list(size = 5)),
+    shape  = guide_legend(override.aes = list(size = 5))),
+  plot_theme())
+
+```
+
+#Functions written for the analysis:
+
+```{r Function: Anova on linear models -> pulling the summary and r2, echo=TRUE}
+
+### This function runs a general anova, and spit out the summary() table and export it
+
+lm_run<- function(model, model_name, save_path=getwd()) {
+  anova_output<- anova(model)
+  model_summary <- summary(model)
+  results_list<- list()
+  
+  results_list[[paste0(model_name, "_anova")]] <- anova_output
+  results_list[[paste0(model_name, "_summary")]] <- model_summary
+  
+  anova_df<- as.data.frame(anova_output)
+  summary_df<- as.data.frame(model_summary$coefficients)
+  
+  return(results_list)
+}
+```
+
+```{r Function: Detecting and Listing Outliers, }
+#This function is used to detect outliers, create a list of the identified outliers.
+detectview_outlier <- function(data, variable) {
+  outliers <- boxplot(data[[variable]], plot = FALSE)$out #Generates a barplot to ID outliets
+  outlier_data <- data[data[[variable]] %in% outliers, ]
+  
+  outlier_plot <- ggplot(data, aes(x = 1, y = !!rlang::sym(variable))) + 
+    geom_boxplot() + 
+    geom_point(data = outlier_data, aes(x = 1, y = !!rlang::sym(variable)), color = "red") + #Makes the outlier more visible
+    labs(x = "", y = variable, title = paste("Boxplot of", variable, "outliers"))
+  
+  return(list(plot = outlier_plot, outlier_data = outlier_data)) #Provides detail about the identified outliers
+}
+```
+
+#Importing Data
+
+```{r Data Import of Single Inoculation (ss_df), results = HIDE, warning = HIDE, collapse=TRUE}
+# Import and tidying of Data
+#setwd("~/GitHub/matrix-interact/Analysis/")
+
+# Setting up plot and directories to be easily found:
+plot_dir<-("../figures/")
+table_dir<-("../tables/")
+
+ss_df<-data.frame(fread("../data/MasterSpreadsheet_AVT.csv"))
+
+# Removing erroneous columns in the original data frame, this includes collection notes
+ss_df <- ss_df[, !colnames(ss_df) %in% "NOTES"]
+
+# Adding total nodule count and the proportion of branched nodules
+ss_df<-ss_df %>%
+  mutate(Nod_count=Nod_lobe+Nod_unlobed)%>% #Counting total observed nodules
+  mutate(prop_lobe=Nod_lobe/Nod_count) %>% #Creating the proportion of branched nodules to nodule count
+  filter_at(vars(Nod_count:prop_lobe), all_vars(!is.infinite(.)))%>% #Checking for any infinite values
+  mutate(Biomass_g=Rootweight_g+Shootweight_g)%>% #Coutning total host mass biomass
+  na.omit(ss_df) #Removing any NAs
+
+# Seperate data frame that is the mean of every Isolate-Host variety combination across all replicates
+Mean_lobe<-ss_df %>% group_by(Strain,Variety,Source_variety,Chloro_avg)%>% summarize(lobe_mean=mean(prop_lobe, na.rm=TRUE))
+
+# Using the detect outlier function to isolate them, no major outliers found in biomass
+Biom_outlier<-detectview_outlier(ss_df,"Biomass_g")
+Lobe_outlier<-detectview_outlier(ss_df,"prop_lobe") #Removing plants that have a proportion of 1 meaning all nodules we're branched -> most likely a counting error 
+
+# Get the outlier data by XYZ_outlier$outlier_data 
+Lobe_outlier$outlier_data 
+# Removing found outliers
+Prop_lobe.outliers<-c("110_O_a","EXC_O_d")
+
+ss_df<-ss_df %>%
+  filter(!(Label %in% Prop_lobe.outliers))
+
+```
+
+```{r Data Import of CFU experiment (cfu_df), message=FALSE, warning=FALSE, page.print=FALSE}
+#Loading in the cfu dataset
+cfu_df<-data.frame(fread("../data/AVT_CFU_count.csv"))
+
+# Removing erroneous columns from the data frame like notes from the harvest, and renames one column to be easier to call into R
+
+cfu_df <- cfu_df %>%
+  mutate(Comments=NULL)%>%
+  mutate(dilution.counted=NULL)%>%
+  rename(rhz_released = Lianas.rhizobia.released.per.nodule.calculation)%>% 
+# Since we had a couple of nodules that had higher than 5 branches we combined them into a 5+ category
+  mutate(Nodule.lobes = ifelse(Nodule.lobes == "more than 5", "5+", 
+                        ifelse(Nodule.lobes == "More than 5", "5+",
+                        ifelse(Nodule.lobes == "5", "5+",
+#Few nodules had 3-4 branches so we combined them into a 3-4 category
+                        ifelse(Nodule.lobes %in% c("3", "4"), "3-4", Nodule.lobes)))))%>%
+# Making sure the branch coulmn is considered a factor
+  mutate(Nodule.lobes = as.factor(Nodule.lobes))
+
+# Extracting sample data from the sample-ID
+cfu_df<-separate(cfu_df, Plant, into = c("Strain","Host","rep"), sep="\\.")
+
+# Ensuring intended variables are numeric and factor as intended
+cfu_df$rhz_released<-as.numeric(cfu_df$rhz_released)
+cfu_df$Nodule.area<-as.numeric(cfu_df$Nodule.area)
+cfu_df$spot.avg <- as.numeric(gsub("[^0-9.]", "", cfu_df$spot.avg))
+
+
+# Detecting outliers in the CFU data
+RhzReleased_outlier<-detectview_outlier(cfu_df,"rhz_released")
+Nodule.area_outlier<-detectview_outlier(cfu_df,"Nodule.area")
+
+# Removing detected outliers
+RhzReleased.outliers<-c("070.O.b.5")
+Nodule.area.outliers<-c("044.V.b.4")
+
+cfu_df<-cfu_df %>%
+#Only removing the largest outlier
+  filter(!(Ind.Label %in% RhzReleased.outliers))%>%
+#Removing size that was likely an error during processing
+  filter(!(Ind.Label %in% Nodule.area.outliers))%>%
+  na.omit(cfu_df)
+
+# Removing any NA's introduced by adding a log transformation to the colony counts
+cfu_df[is.infinite(log10(cfu_df$rhz_released)) | 
+         is.na(log10(cfu_df$rhz_released)), ]
+cfu_df <- subset(cfu_df, rhz_released > 0 & !is.na(rhz_released))
+
+```
+
+```{r Strain Reaction norm df (str.host_mean_df), collapse=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+# Another dataframe to create a reaction norm like plot
+#Taking the mean across reps, strain, and variety to reduce noise
+str.host_mean_df <- ss_df %>%
+  group_by(Strain,Variety)%>%
+  summarise(mean_prop_lobe=mean(prop_lobe,na.rm=TRUE), 
+            mean_chloro_avg=mean(Chloro_avg, na.rm=TRUE),
+            mean_biomass_g=mean(Biomass_g, na.rm=TRUE),
+            mean_nod_num=mean(Nod_count, na.rm=TRUE),
+            mean_agbiomass_g=mean(Shootweight_g, na.rm=TRUE))
+```
+
+#Statistics used 
+##Rhizboial focused traits 
+```{r Rhizobial Trait, echo=FALSE, warning=FALSE, message=TRUE}
+#Anova examining Nodule area response predicted by branch #, host variety,and isolate ID
+nodarea<-lm(log10(Nodule.area)~Nodule.lobes*Host*Strain+rep, data=cfu_df)
+nodarea.results<-lm_run(nodarea, model_name="nodarea")
+aov.nodarea<-anova(nodarea)
+write.csv(aov.nodarea, file=paste(table_dir,"Nodule-Area-response_anova.csv"))
+aov.nodarea
+aov.nodarea[["Sum Sq"]] / sum(aov.nodarea[["Sum Sq"]])
+
+#Model examining Amount of viable rhizobia released focused on number of nodule branches as a predictor
+rhz_released<-lm(log10(rhz_released)~as.factor(Nodule.lobes)*Host+as.factor(Strain)+rep, data=cfu_df)
+rhz_released.results<-lm_run(rhz_released, "rhzreleased")
+aov.rhzreleased<- anova(rhz_released)
+write.csv(aov.rhzreleased, file=paste(table_dir,"RhizobiaReleased-response_anova.csv"))
+aov.rhzreleased
+aov.rhzreleased[["Sum Sq"]] / sum(aov.rhzreleased[["Sum Sq"]])
+
+
+# Model examining amount of rhizobia released focused on nodule surface area as a predictor 
+rhztestarea<-lm(log10(rhz_released)~Nodule.area*Nodule.lobes+Host+Strain+rep, data=cfu_df)
+rhztestarea.results<-lm_run(rhztestarea,"rhzarea")
+aov.rhztestarea<- anova(rhztestarea)
+write.csv(aov.rhztestarea, file=paste(table_dir,"Nodulearea-by-surfacearea_anova.csv"))
+aov.rhztestarea
+aov.rhztestarea[["Sum Sq"]] / sum(aov.rhztestarea[["Sum Sq"]])
+
+
+```
+
+##Statistical Analysis of the Host plant traits
+```{r host plant trait, echo=FALSE, warning=FALSE, message=TRUE}
+# Anova is being ran on models associated with host traits 
+# Modeling the mean nodule number predicted by proportion of branched nodules and host variety
+nodnumber<-lm(mean_nod_num~mean_prop_lobe*Variety+Strain,data=str.host_mean_df)
+nodnum.results<-lm_run(nodnumber, "nodnum")
+aov.nodnum<-anova(nodnumber)
+write.csv(aov.nodnum, file=paste(table_dir,"Nodulenumber-response_anova.csv"))
+aov.nodnum
+aov.nodnum[["Sum Sq"]] / sum(aov.nodnum[["Sum Sq"]])
+
+
+# Modeling the mean host plant biomass predicted by the mean proportion of branched nodules and host variety
+biomass<-lm(mean_biomass_g~mean_prop_lobe*Variety+Strain,data=str.host_mean_df)
+biomass.results<-lm_run(biomass, "biomass")
+aov.biomass<-anova(biomass)
+write.csv(aov.biomass, file=paste(table_dir,"Biomass-response_anova.csv"))
+aov.biomass
+aov.biomass[["Sum Sq"]] / sum(aov.biomass[["Sum Sq"]])
+
+```
+
+#Figures
+
+##Figure 2
+```{r Figure 2, echo=FALSE, warning=FALSE, message=TRUE}
+#Single plot exporting has been "#" out to make this knit, if an export is needed removing the "#" from the svg and dev.off() functions below.
+
+#svg(filename=file.path(plot_dir,"Figure_2_surfacearea.svg"), width=3, height=3)
+surface_area_plot<- 
+  ggplot(cfu_df, aes(x=Nodule.lobes, y=Nodule.area, color=Host))+
+  geom_jitter(aes(shape=Strain),width=0.2, size=3)+
+  scale_y_log10()+
+  scale_size_manual(values=c(2.5))+
+  geom_smooth(aes(group=Host),method = "lm", se=FALSE)+
+  labs(x="Number of Nodule Branches", y="Log(Nodule Surface Area)")+
+  labs(shape="Rhizobial\nIsolates")+
+  facet_wrap(~ Host, ncol = 3, labeller = labeller(Host = host_labels))+
+  common_layers+
+  plot_theme()
+#dev.off()
+
+#svg(filename=file.path(plot_dir,"Figure_2_released_rhizobia_branch.svg"), width=3, height=3)
+rhzreleasedbr_plot <- 
+  ggplot(cfu_df, aes(x=Nodule.lobes, y=rhz_released, color=Host))+
+  geom_jitter(aes(shape=Strain),width=0.2, size=3)+
+  scale_y_log10()+
+  scale_size_manual(values=c(2.5))+
+  geom_smooth(aes(group=Host),method = "lm", se=FALSE)+
+  labs(x= "", y="Log10(Number of Undifferentiated\nRhizobia Released)")+
+  labs(shape="Rhizobial\nIsolates")+
+  labs(color="Host Variety")+
+  facet_wrap(~ Host, ncol = 3, labeller = labeller(Host = host_labels))+
+  common_layers+
+  plot_theme()+
+  theme(legend.position = "none")
+  
+#dev.off()
+
+#svg(filename=file.path(plot_dir,"Figure_2_released_rhizobia_branch_ver5.svg"), width=3, height=3)
+rhzreleased_plot<-
+  ggplot(cfu_df, aes(x = Nodule.area, y = rhz_released, color = Nodule.lobes)) +
+  geom_point(aes(shape = Nodule.lobes), size=3)+
+  stat_smooth(method = "loess", span=10, se=FALSE) +
+  scale_y_log10() +
+  scale_shape_manual(values = c("1" = 16, "2" = 15, "3-4" = 17, "5+" = 18))+
+  scale_color_manual(values = c("1"="#273E47", "2"="#BAA5FF", "3-4"="#6E9887", "5+"="#A5402D"), labels= c("1","2","3-4","5+"))+
+  guides(color = guide_legend("Number of\nNodule\nBranches", override.aes = list(shape = c(21,22,24,23))),
+         shape = "none") +
+  labs(x = "Nodule Surface Area", y = "Log10(Number of Undifferentiated\nRhizobia Released)") +
+  facet_wrap(~ Host, labeller = labeller(Host = function(value) {
+    return (ifelse(value == "O", "Onedia", 
+                   ifelse(value == "S", "SW402", 
+                          ifelse(value == "V", "Vernal", value))))}),nrow=3)+
+  theme_bw()+
+    theme(legend.title = element_text(size = 17, face = "bold"),
+      legend.text  = element_text(size = 17, face = "bold"),
+      axis.title = element_text(size=17, face="bold"),
+      axis.text = element_text(size=15),
+      panel.grid.minor = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.background = element_blank(),
+      strip.text = element_text(face = "bold", size=13),
+      axis.line = element_line(linewidth = 1.05,color = "black"))
+#dev.off()
+
+
+#Grid format of Figure 2
+Figure_2_plot<- (surface_area_plot / rhzreleasedbr_plot / rhzreleased_plot)+
+  plot_layout(guides="collect" ) + 
+  theme(legend.position = "right")+
+  plot_annotation(tag_levels = "A") &
+  theme(plot.margin= unit(c(0.5, 0.5, 0.5, 0.5), "pt"),
+        panel.spacing    = unit(1.5, "mm"),
+        legend.box.margin = margin(0, 0, 0, 0, unit = "pt"),
+        plot.tag = element_text(size = 26, face = "bold", hjust = 6, vjust= -2))
+
+
+svg(filename=file.path(plot_dir,"Figure_2_ver4.svg"),width=10, height=14)
+print(Figure_2_plot)
+dev.off()
+
+
+```
+
+##Figure 3
+```{r Figure 3, echo=FALSE, warning=FALSE, message=TRUE}
+#Plots generated for figure 3. Single plot exporting has been "#" out to make this knit, if an export is needed removing the "#" from the svg() and dev.off() functions below.
+
+#Mean Host Biomass Plot
+#svg(filename=file.path(plot_dir,"Figure_3_biomass.svg"), width=3, height=3)
+biomass_plot<-
+ggplot(str.host_mean_df, aes(x=mean_prop_lobe, y=mean_biomass_g, color=Variety))+
+  geom_point(alpha=0.6, size=3)+
+  stat_smooth(method="lm",se = FALSE)+
+  labs(x="", y="Mean Host Biomass (g)",
+       color= "Host Variety")+
+  scale_color_manual(values =c("O"="#471323", "S"="#ADB9E3", "V"="#FCB0B3"))+
+  common_layers
+#dev.off()
+
+#Mean Nodule Count Plot
+#svg(filename=file.path(plot_dir,"Figure_3_nodulecount.svg"), width=3, height=3)
+nodulecount_plot<- 
+  ggplot(str.host_mean_df, aes(x=mean_prop_lobe, y=mean_nod_num, color=Variety))+
+  geom_point(alpha=0.6, size=3)+
+  stat_smooth(method="lm",se = FALSE)+
+  labs(y="Mean Nodule Count", x="Mean Proportion of Branched Nodules",
+       color= "Host Variety")+
+  scale_color_manual(values =c("O"="#471323", "S"="#ADB9E3", "V"="#FCB0B3"))+
+common_layers
+#dev.off()
+
+#Mean Prop Nodules across Host Variety
+#svg(filename=file.path(plot_dir,"Figure_3_propbranch.svg"), width=5, height=5)
+proplobe_plot<-ggplot(str.host_mean_df, aes(x=Variety, y=mean_prop_lobe, group=Strain, color=Variety))+
+  geom_line(color="gray",linewidth=1, alpha=0.3, show.legend = FALSE)+
+  geom_jitter(alpha=0.7, width=0.25, size=3, show.legend = FALSE)+
+  labs(x="Alfalfa Host Variety", y="Mean Proportion of\nBranched Nodules")+
+  common_layers+
+    plot_theme()
+#dev.off()
+
+# Generates the combined figure 3 plot
+fig_3_plot <- biomass_plot + nodulecount_plot + proplobe_plot +
+  plot_layout(guides = "collect") + plot_annotation(tag_levels = "A") &
+  theme(legend.position = "top", plot.tag = element_text(size = 26, face = "bold", hjust = 0.2, vjust = -4)) 
+
+
+svg(filename=file.path(plot_dir,"Figure_3.svg"), width=15, height=7)
+print(fig_3_plot)
+dev.off()
+```
+
+#Supplemental
+
+```{r Supplement tables}
+#Building supplemental table of anova results from tested models
+tab.1a <- data.frame(dataset="cfu_df", model="log10(Nodule.area)~Nodule.lobes*Host*Strain+rep",Term=row.names(aov.nodarea),
+                     Df=aov.nodarea$Df,
+                     Prop.Var=round(aov.nodarea$`Sum Sq`/sum(aov.nodarea$`Sum Sq`),3),
+                     Fstat=round(aov.nodarea$`F value`,2),
+                     Pvalue=aov.nodarea$`Pr(>F)`)
+tab.1b <- data.frame(dataset="cfu_df", model="log10(rhz_released)~as.factor(Nodule.lobes)*Host+as.factor(Strain)+rep",Term=row.names(aov.rhzreleased),
+                     Df=aov.rhzreleased$Df,
+                     Prop.Var=round(aov.rhzreleased$`Sum Sq`/sum(aov.rhzreleased$`Sum Sq`),3),
+                     Fstat=round(aov.rhzreleased$`F value`,2),
+                     Pvalue=aov.rhzreleased$`Pr(>F)`)
+tab.2a <- data.frame(dataset="str.host_mean_df", model="mean_nod_num~mean_prop_lobe*Variety+Strain",Term=row.names(aov.nodnum),
+                     Df=aov.nodnum$Df,
+                     Prop.Var=round(aov.nodnum$`Sum Sq`/sum(aov.nodnum$`Sum Sq`),3),
+                     Fstat=round(aov.nodnum$`F value`,2),
+                     Pvalue=aov.nodnum$`Pr(>F)`)
+tab.2c <- data.frame(dataset="str.host_mean_df", model="mean_biomass_g~mean_prop_lobe*Variety+Strain",Term=row.names(aov.biomass),
+                     Df=aov.biomass$Df,
+                     Prop.Var=round(aov.biomass$`Sum Sq`/sum(aov.biomass$`Sum Sq`),3),
+                     Fstat=round(aov.biomass$`F value`,2),
+                     Pvalue=aov.biomass$`Pr(>F)`)
+tab.s1 <- data.frame(dataset="rhztestarea", model="log10(rhz_released)~Nodule.area*Nodule.lobes+Host+Strain+rep",Term=row.names(aov.rhztestarea),
+                     Df=aov.rhztestarea$Df,
+                     Prop.Var=round(aov.rhztestarea$`Sum Sq`/sum(aov.rhztestarea$`Sum Sq`),3),
+                     Fstat=round(aov.rhztestarea$`F value`,2),
+                     Pvalue=aov.rhztestarea$`Pr(>F)`)
+supplement_table <- rbind(tab.1a, tab.1b, tab.2a, tab.2c, tab.s1)
+write.csv(supplement_table, file=paste0(table_dir, "Supplement_table1.csv"))
+
+```
