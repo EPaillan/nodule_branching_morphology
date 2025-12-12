@@ -25,30 +25,32 @@ set.seed(100)
 
 ```{r GGplot theme, include=FALSE}
 #Below is the general theme used for all ggplot2 figures
-plot_theme<- function(){
-  theme_bw()+
-    theme(
-      legend.title = element_text(size = 18, face = "bold"),
-      legend.text  = element_text(size = 18, face = "bold"),
-      axis.title = element_text(size=18, face="bold"),
-      axis.text = element_text(size=17),
-      strip.text = element_text(size=16, face = "bold"),
-      panel.grid.minor = element_blank(),
-      panel.grid.major = element_blank(),
+plot_theme <- function(base_size = 18) {
+  theme_bw(base_size = base_size) +
+    theme(legend.title = element_text(face = "bold"),
+      legend.text  = element_text(face = "bold"),
+      axis.title   = element_text(face = "bold"),
+      strip.text   = element_text(face = "bold"),
+      panel.grid   = element_blank(),
       panel.background = element_blank(),
-      axis.line = element_line(linewidth = 1.05,color = "black")
-    )
-    }
+      axis.line    = element_line(linewidth = 1.05, color = "black"))
+}
 
-#Changing host variety names to their full names & add designated colorscheme
+#Changing host variety names to their full names & add designated color scheme
 host_labels <- c(O = "Onedia", S = "SW402", V = "Vernal")
-common_layers <- list(
-  scale_color_manual(values = c("O" = "#471323", "S" = "#ADB9E3", "V" = "#FCB0B3")),
-  scale_shape_manual(values = c(0,1,2,5,4,3,6,8),
-                     labels = c("1","2","3","4","5","6","7","8")),
-  guides(colour = guide_legend(override.aes = list(size = 5)),
-    shape  = guide_legend(override.aes = list(size = 5))),
-  plot_theme())
+host_colors <- c(O = "#471323", S = "#ADB9E3", V = "#FCB0B3")
+
+#same thing while nodule branch number
+nbranch_labels <- c("1", "2", "3-4", "5+")
+nbranch_colors <- c("1" = "#273E47",
+                    "2" = "#BAA5FF",
+                    "3-4" = "#6E9887",
+                    "5+" = "#A5402D")
+nbranch_shapes <- c("1" = 16, "2" = 15, "3-4" = 17, "5+" = 18)
+
+#and strain ID
+strain_labels <- c("001"=1, "012"=2, "044"=3, "059"=4, "070"=5, "077"=6, "112"=7, "117"=8)
+strain_shapes <- c("001"=15, "012"=16, "044"=17, "059"=18, "070"=8, "077"=4, "112"=25, "117"=3)
 
 ```
 
@@ -76,7 +78,7 @@ lm_run<- function(model, model_name, save_path=getwd()) {
 ```{r Function: Detecting and Listing Outliers, }
 #This function is used to detect outliers, create a list of the identified outliers.
 detectview_outlier <- function(data, variable) {
-  outliers <- boxplot(data[[variable]], plot = FALSE)$out #Generates a barplot to ID outliets
+  outliers <- boxplot(data[[variable]], plot = FALSE)$out #Generates a barplot to ID outliers
   outlier_data <- data[data[[variable]] %in% outliers, ]
   
   outlier_plot <- ggplot(data, aes(x = 1, y = !!rlang::sym(variable))) + 
@@ -91,12 +93,12 @@ detectview_outlier <- function(data, variable) {
 #Importing Data
 
 ```{r Data Import of Single Inoculation (ss_df), results = HIDE, warning = HIDE, collapse=TRUE}
-# Import and tidying of Data
-#setwd("~/GitHub/matrix-interact/Analysis/")
+#Import and tidying of Data
+setwd("~/GitHub/nodule_branching_morphology/Analysis/")
 
-# Setting up plot and directories to be easily found:
-plot_dir<-("../figures/")
-table_dir<-("../tables/")
+#Setting up plot and directories to be easily found:
+plot_dir<-("../Figures/")
+table_dir<-("../Tables/")
 
 ss_df<-data.frame(fread("../data/MasterSpreadsheet_AVT.csv"))
 
@@ -111,7 +113,7 @@ ss_df<-ss_df %>%
   mutate(Biomass_g=Rootweight_g+Shootweight_g)%>% #Coutning total host mass biomass
   na.omit(ss_df) #Removing any NAs
 
-# Seperate data frame that is the mean of every Isolate-Host variety combination across all replicates
+# Separate data frame that is the mean of every Isolate-Host variety combination across all replicates
 Mean_lobe<-ss_df %>% group_by(Strain,Variety,Source_variety,Chloro_avg)%>% summarize(lobe_mean=mean(prop_lobe, na.rm=TRUE))
 
 # Using the detect outlier function to isolate them, no major outliers found in biomass
@@ -119,7 +121,7 @@ Biom_outlier<-detectview_outlier(ss_df,"Biomass_g")
 Lobe_outlier<-detectview_outlier(ss_df,"prop_lobe") #Removing plants that have a proportion of 1 meaning all nodules we're branched -> most likely a counting error 
 
 # Get the outlier data by XYZ_outlier$outlier_data 
-Lobe_outlier$outlier_data 
+Lobe_outlier$outlier_data
 # Removing found outliers
 Prop_lobe.outliers<-c("110_O_a","EXC_O_d")
 
@@ -132,35 +134,34 @@ ss_df<-ss_df %>%
 #Loading in the cfu dataset
 cfu_df<-data.frame(fread("../data/AVT_CFU_count.csv"))
 
-# Removing erroneous columns from the data frame like notes from the harvest, and renames one column to be easier to call into R
-
+#Removing erroneous columns from the data frame like notes from the harvest, and renames one column to be easier to call into R
 cfu_df <- cfu_df %>%
   mutate(Comments=NULL)%>%
   mutate(dilution.counted=NULL)%>%
   rename(rhz_released = Lianas.rhizobia.released.per.nodule.calculation)%>% 
-# Since we had a couple of nodules that had higher than 5 branches we combined them into a 5+ category
+#Since we had a couple of nodules that had higher than 5 branches we combined them into a 5+ category
   mutate(Nodule.lobes = ifelse(Nodule.lobes == "more than 5", "5+", 
                         ifelse(Nodule.lobes == "More than 5", "5+",
                         ifelse(Nodule.lobes == "5", "5+",
 #Few nodules had 3-4 branches so we combined them into a 3-4 category
                         ifelse(Nodule.lobes %in% c("3", "4"), "3-4", Nodule.lobes)))))%>%
-# Making sure the branch coulmn is considered a factor
+#Making sure the branch coulmn is considered a factor
   mutate(Nodule.lobes = as.factor(Nodule.lobes))
 
-# Extracting sample data from the sample-ID
+#Extracting sample data from the sample-ID
 cfu_df<-separate(cfu_df, Plant, into = c("Strain","Host","rep"), sep="\\.")
 
-# Ensuring intended variables are numeric and factor as intended
+#Ensuring intended variables are numeric and factor as intended
 cfu_df$rhz_released<-as.numeric(cfu_df$rhz_released)
 cfu_df$Nodule.area<-as.numeric(cfu_df$Nodule.area)
 cfu_df$spot.avg <- as.numeric(gsub("[^0-9.]", "", cfu_df$spot.avg))
 
 
-# Detecting outliers in the CFU data
+#Detecting outliers in the CFU data
 RhzReleased_outlier<-detectview_outlier(cfu_df,"rhz_released")
 Nodule.area_outlier<-detectview_outlier(cfu_df,"Nodule.area")
 
-# Removing detected outliers
+#Removing detected outliers
 RhzReleased.outliers<-c("070.O.b.5")
 Nodule.area.outliers<-c("044.V.b.4")
 
@@ -171,7 +172,7 @@ cfu_df<-cfu_df %>%
   filter(!(Ind.Label %in% Nodule.area.outliers))%>%
   na.omit(cfu_df)
 
-# Removing any NA's introduced by adding a log transformation to the colony counts
+#Removing any NA's introduced by adding a log transformation to the colony counts
 cfu_df[is.infinite(log10(cfu_df$rhz_released)) | 
          is.na(log10(cfu_df$rhz_released)), ]
 cfu_df <- subset(cfu_df, rhz_released > 0 & !is.na(rhz_released))
@@ -179,7 +180,7 @@ cfu_df <- subset(cfu_df, rhz_released > 0 & !is.na(rhz_released))
 ```
 
 ```{r Strain Reaction norm df (str.host_mean_df), collapse=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
-# Another dataframe to create a reaction norm like plot
+#Another dataframe to create a reaction norm like plot
 #Taking the mean across reps, strain, and variety to reduce noise
 str.host_mean_df <- ss_df %>%
   group_by(Strain,Variety)%>%
@@ -223,8 +224,8 @@ aov.rhztestarea[["Sum Sq"]] / sum(aov.rhztestarea[["Sum Sq"]])
 
 ##Statistical Analysis of the Host plant traits
 ```{r host plant trait, echo=FALSE, warning=FALSE, message=TRUE}
-# Anova is being ran on models associated with host traits 
-# Modeling the mean nodule number predicted by proportion of branched nodules and host variety
+#Anova is being ran on models associated with host traits 
+#Modeling the mean nodule number predicted by proportion of branched nodules and host variety
 nodnumber<-lm(mean_nod_num~mean_prop_lobe*Variety+Strain,data=str.host_mean_df)
 nodnum.results<-lm_run(nodnumber, "nodnum")
 aov.nodnum<-anova(nodnumber)
@@ -233,13 +234,24 @@ aov.nodnum
 aov.nodnum[["Sum Sq"]] / sum(aov.nodnum[["Sum Sq"]])
 
 
-# Modeling the mean host plant biomass predicted by the mean proportion of branched nodules and host variety
+#Modeling the mean host plant biomass predicted by the mean proportion of branched nodules and host variety
 biomass<-lm(mean_biomass_g~mean_prop_lobe*Variety+Strain,data=str.host_mean_df)
 biomass.results<-lm_run(biomass, "biomass")
 aov.biomass<-anova(biomass)
 write.csv(aov.biomass, file=paste(table_dir,"Biomass-response_anova.csv"))
 aov.biomass
 aov.biomass[["Sum Sq"]] / sum(aov.biomass[["Sum Sq"]])
+
+
+propbr<- lm(prop_lobe ~ Variety*Strain+Rep,data=ss_df)
+propbr.results<- lm_run(propbr,"meanbranch")
+aov.propbr<-anova(propbr)
+write.csv(aov.propbr, file=paste(table_dir,"proplobe-response_anova.csv"))
+aov.propbr
+aov.propbr[["Sum Sq"]] / sum(aov.propbr[["Sum Sq"]])
+
+
+
 
 ```
 
@@ -251,30 +263,30 @@ aov.biomass[["Sum Sq"]] / sum(aov.biomass[["Sum Sq"]])
 
 #svg(filename=file.path(plot_dir,"Figure_2_surfacearea.svg"), width=3, height=3)
 surface_area_plot<- 
-  ggplot(cfu_df, aes(x=Nodule.lobes, y=Nodule.area, color=Host))+
+  ggplot(cfu_df, aes(x=Nodule.lobes, y=Nodule.area, color=Nodule.lobes, shape=Strain))+
   geom_jitter(aes(shape=Strain),width=0.2, size=3)+
-  scale_y_log10()+
   scale_size_manual(values=c(2.5))+
-  geom_smooth(aes(group=Host),method = "lm", se=FALSE)+
-  labs(x="Number of Nodule Branches", y="Log(Nodule Surface Area)")+
-  labs(shape="Rhizobial\nIsolates")+
+  geom_smooth(aes(group=Host),method = "lm", se=FALSE, color="black")+
+  labs(x="", y="Nodule Surface Area(cm2)", shape="Rhizobial\nIsolates", color="Number of\nNodule\nBranches")+
+  scale_color_manual(values=nbranch_colors, labels=nbranch_labels)+
+  scale_shape_manual(values = strain_shapes, labels=strain_labels)+
   facet_wrap(~ Host, ncol = 3, labeller = labeller(Host = host_labels))+
-  common_layers+
   plot_theme()
 #dev.off()
 
 #svg(filename=file.path(plot_dir,"Figure_2_released_rhizobia_branch.svg"), width=3, height=3)
 rhzreleasedbr_plot <- 
-  ggplot(cfu_df, aes(x=Nodule.lobes, y=rhz_released, color=Host))+
+  ggplot(cfu_df, aes(x=Nodule.lobes, y=rhz_released, color=Nodule.lobes, shape=Strain))+
   geom_jitter(aes(shape=Strain),width=0.2, size=3)+
-  scale_y_log10()+
   scale_size_manual(values=c(2.5))+
-  geom_smooth(aes(group=Host),method = "lm", se=FALSE)+
-  labs(x= "", y="Log10(Number of Undifferentiated\nRhizobia Released)")+
+  geom_smooth(aes(group=Host),method = "lm", se=FALSE, color="black")+
+  scale_y_log10()+
+  labs(x= "Number of Nodule Branches", y="CFU/Nodule")+
   labs(shape="Rhizobial\nIsolates")+
   labs(color="Host Variety")+
+  scale_color_manual(values=nbranch_colors, labels=nbranch_labels)+
+  scale_shape_manual(values = strain_shapes, labels=strain_labels)+
   facet_wrap(~ Host, ncol = 3, labeller = labeller(Host = host_labels))+
-  common_layers+
   plot_theme()+
   theme(legend.position = "none")
   
@@ -283,34 +295,21 @@ rhzreleasedbr_plot <-
 #svg(filename=file.path(plot_dir,"Figure_2_released_rhizobia_branch_ver5.svg"), width=3, height=3)
 rhzreleased_plot<-
   ggplot(cfu_df, aes(x = Nodule.area, y = rhz_released, color = Nodule.lobes)) +
-  geom_point(aes(shape = Nodule.lobes), size=3)+
+  geom_point(size=3)+
   stat_smooth(method = "loess", span=10, se=FALSE) +
-  scale_y_log10() +
-  scale_shape_manual(values = c("1" = 16, "2" = 15, "3-4" = 17, "5+" = 18))+
-  scale_color_manual(values = c("1"="#273E47", "2"="#BAA5FF", "3-4"="#6E9887", "5+"="#A5402D"), labels= c("1","2","3-4","5+"))+
-  guides(color = guide_legend("Number of\nNodule\nBranches", override.aes = list(shape = c(21,22,24,23))),
-         shape = "none") +
-  labs(x = "Nodule Surface Area", y = "Log10(Number of Undifferentiated\nRhizobia Released)") +
-  facet_wrap(~ Host, labeller = labeller(Host = function(value) {
-    return (ifelse(value == "O", "Onedia", 
-                   ifelse(value == "S", "SW402", 
-                          ifelse(value == "V", "Vernal", value))))}),nrow=3)+
-  theme_bw()+
-    theme(legend.title = element_text(size = 17, face = "bold"),
-      legend.text  = element_text(size = 17, face = "bold"),
-      axis.title = element_text(size=17, face="bold"),
-      axis.text = element_text(size=15),
-      panel.grid.minor = element_blank(),
-      panel.grid.major = element_blank(),
-      panel.background = element_blank(),
-      strip.text = element_text(face = "bold", size=13),
-      axis.line = element_line(linewidth = 1.05,color = "black"))
+  scale_y_log10()+
+scale_color_manual(values=nbranch_colors, labels=nbranch_labels)+
+  labs(x = "Nodule Surface Area(cm2)", y = "CFU/Nodule")+
+    facet_wrap(~ Host, nrow = 3, labeller = labeller(Host = host_labels))+
+  plot_theme()+
+  theme(legend.position = "none")
+
 #dev.off()
 
 
 #Grid format of Figure 2
 Figure_2_plot<- (surface_area_plot / rhzreleasedbr_plot / rhzreleased_plot)+
-  plot_layout(guides="collect" ) + 
+  plot_layout(guides="collect", heights=c(1,1,1.75)) + 
   theme(legend.position = "right")+
   plot_annotation(tag_levels = "A") &
   theme(plot.margin= unit(c(0.5, 0.5, 0.5, 0.5), "pt"),
@@ -319,7 +318,7 @@ Figure_2_plot<- (surface_area_plot / rhzreleasedbr_plot / rhzreleased_plot)+
         plot.tag = element_text(size = 26, face = "bold", hjust = 6, vjust= -2))
 
 
-svg(filename=file.path(plot_dir,"Figure_2_ver4.svg"),width=10, height=14)
+svg(filename=file.path(plot_dir,"Figure_2_ver6.svg"),width=10, height=14)
 print(Figure_2_plot)
 dev.off()
 
@@ -339,7 +338,7 @@ ggplot(str.host_mean_df, aes(x=mean_prop_lobe, y=mean_biomass_g, color=Variety))
   labs(x="", y="Mean Host Biomass (g)",
        color= "Host Variety")+
   scale_color_manual(values =c("O"="#471323", "S"="#ADB9E3", "V"="#FCB0B3"))+
-  common_layers
+  plot_theme()
 #dev.off()
 
 #Mean Nodule Count Plot
@@ -351,7 +350,7 @@ nodulecount_plot<-
   labs(y="Mean Nodule Count", x="Mean Proportion of Branched Nodules",
        color= "Host Variety")+
   scale_color_manual(values =c("O"="#471323", "S"="#ADB9E3", "V"="#FCB0B3"))+
-common_layers
+  plot_theme()
 #dev.off()
 
 #Mean Prop Nodules across Host Variety
@@ -360,7 +359,6 @@ proplobe_plot<-ggplot(str.host_mean_df, aes(x=Variety, y=mean_prop_lobe, group=S
   geom_line(color="gray",linewidth=1, alpha=0.3, show.legend = FALSE)+
   geom_jitter(alpha=0.7, width=0.25, size=3, show.legend = FALSE)+
   labs(x="Alfalfa Host Variety", y="Mean Proportion of\nBranched Nodules")+
-  common_layers+
     plot_theme()
 #dev.off()
 
