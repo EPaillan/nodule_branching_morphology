@@ -1,6 +1,6 @@
 ---
 title: "Nodule branching, size, and symbiosis outcomes are shaped by natural genetic variation in rhizobial bacteria and alfalfa hosts "
-author: "Elizabeth Leslie Paillan - elpailla@ncsu.edu & Liana Burghardt - liana.burghardt@psu.edu"
+author: "Elizabeth Leslie Paillan - elpailla@ncsu.edu, Maria Alejandra Gil Polo - mag6678@psu.edu, Liana Burghardt - liana.burghardt@psu.edu"
 date: "2025-10-25"
 output:
   html_document: default
@@ -14,6 +14,7 @@ Nodule traits being examined: Proportion Lobed (prop_lobe= \# of lobed nodule/ t
 #Libraries Used
 
 ```{r Library setup, echo = TRUE, warning=FALSE}
+
 library(tidyverse); packageVersion("tidyverse")
 library(BSDA); packageVersion("BSDA")
 library(patchwork); packageVersion("patchwork")
@@ -21,6 +22,7 @@ library(svglite); packageVersion("svglite")
 library(performance); packageVersion("performance")
 library(data.table); packageVersion("data.table")
 set.seed(100)
+
 ```
 
 ```{r GGplot theme, include=FALSE}
@@ -94,7 +96,8 @@ detectview_outlier <- function(data, variable) {
 
 ```{r Data Import of Single Inoculation (ss_df), results = HIDE, warning = HIDE, collapse=TRUE}
 #Import and tidying of Data
-setwd("~/GitHub/nodule_branching_morphology/Analysis/")
+setwd("~/GitHub/nodule_branching_morphology/Analysis/") #Maria: I was not able to change directory
+getwd()
 
 #Setting up plot and directories to be easily found:
 plot_dir<-("../Figures/")
@@ -110,7 +113,7 @@ ss_df<-ss_df %>%
   mutate(Nod_count=Nod_lobe+Nod_unlobed)%>% #Counting total observed nodules
   mutate(prop_lobe=Nod_lobe/Nod_count) %>% #Creating the proportion of branched nodules to nodule count
   filter_at(vars(Nod_count:prop_lobe), all_vars(!is.infinite(.)))%>% #Checking for any infinite values
-  mutate(Biomass_g=Rootweight_g+Shootweight_g)%>% #Coutning total host mass biomass
+  mutate(Biomass_g=Rootweight_g+Shootweight_g)%>% #Counting total host mass biomass
   na.omit(ss_df) #Removing any NAs
 
 # Separate data frame that is the mean of every Isolate-Host variety combination across all replicates
