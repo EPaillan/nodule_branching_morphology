@@ -1,0 +1,205 @@
+---
+title: "Maximum-likelihood tree for examining biomass effects caused by the 8 strain subset"
+author: " Maria Alejandra Gil Polo - mag6678@psu.edu, Elizabeth Leslie Paillan - elpailla@ncsu.edu, Liana Burghardt - liana.burghardt@psu.edu"
+date: "2026-04-27"
+output: html_document
+---
+This RMD contains code for generating the biomass maximum-likelihood plot we used to show how different the 8 strains we used span across our 117 strain collection, and to show how 
+
+## Mariale trying to figure out how to better represent the span of shoot biomass 
+
+```{r libraries,  echo = TRUE, warning=FALSE}
+
+library(tidyverse)
+library(ggpubr)
+library(ggplot2)
+library(RColorBrewer)
+library(gplots)
+library(ggtree)
+library(vegan)
+library(corrplot)
+library(patchwork)
+library(ggnewscale)
+library(ape)
+library(readxl)
+library(ggtreeExtra)
+library(colorRamps)
+
+
+ss_df<-data.frame(fread("../data/MasterSpreadsheet_AVT.csv"))
+# Removing erroneous columns in the original data frame, this includes collection notes
+ss_df <- ss_df[, !colnames(ss_df) %in% "NOTES"]
+
+# Adding total nodule count and the proportion of branched nodules
+ss_df<-ss_df %>%
+  mutate(Nod_count=Nod_lobe+Nod_unlobed)%>% #Counting total observed nodules
+  mutate(prop_lobe=Nod_lobe/Nod_count) %>% #Creating the proportion of branched nodules to nodule count
+  mutate(Biomass_g=Rootweight_g+Shootweight_g) #Coutning total host mass biomass
+
+
+## I am going to filter out MIX
+ss_df <- ss_df %>% 
+  filter(!Strain %in% c("MIX", "NIG", "MC2", "EXC", "UNI")) %>% 
+    filter(!is.na(Strain), Strain != "")
+
+
+
+## I am only going to select the things I am interested in 
+ss_df_shoot <- ss_df %>% select(Strain, Variety, Shootweight_g)
+
+
+#ss_df_shoot <- ss_df %>% select(Strain, Variety, Shootweight_g) ## According to her code the mean of shoot biomass is named mean_abiomass_g
+ss_df_shoot_mean <- ss_df_shoot %>%
+  group_by(Strain, Variety) %>%
+  summarise(shoot_ave = mean(Shootweight_g, na.rm = TRUE))
+
+View(ss_df_shoot_mean)
+
+Shoot_biomass <- ss_df_shoot_mean %>%
+  pivot_wider(
+    names_from = Variety,   # Variety values become column names
+    values_from = shoot_ave   # Biomass values fill the cells
+  )
+
+Shoot_biomass
+
+```
+
+## For the actual tree
+
+The aesthetics of the tree were mostly arranged in the itols app. However, I created the metadata to be imported to itols in the code bellow
+```{r}
+### These files were done by Sohini Guha. 
+tree<-read.tree("../Data/AVT_single_copy_core_concat.fasta.treefile")
+
+
+# 2. Read your annotation file from iTOL
+# Replace the path with wherever you saved Annotation_iTOL_final.txt
+meta_raw <- read.delim("../Data/Annotation_iTOL_final.txt", sep = "\t", header = TRUE)
+meta_raw ## This is the meta_raw used in Sohini's paper: Morphology and origin
+
+###  I am trying to work with the codes that I used 
+Codes <- read_excel("/Users/mariaalejandragilpolo/Downloads/Strain_codes_ForTree.xlsx") #Has all the 117 strains
+
+## Rename Strain as Strain_Code
+
+Shoot_biomass_edit <- Shoot_biomass %>% dplyr::rename(Strain_Code = Strain) 
+
+Shoot_biomass_withCodes <- left_join(Codes, Shoot_biomass_edit, by = "Strain_Code") 
+
+
+### Start with the labels 
+
+
+#### labels_df for labels. 
+labels_df <- data.frame(
+  tip = meta_tree$Strain,
+  new_label = meta_tree$Strain_Code
+)
+labels_df <- labels_df[!is.na(labels_df$tip) & !is.na(labels_df$new_label), ]
+labels_df
+
+
+### Create a dataframe with the datapoints I care about: The aboveground biomass data is in Shoot_biomass
+
+meta_tree <- meta_raw %>%
+  left_join(
+    Shoot_biomass_withCodes %>%
+      select(Strain, Strain_Code, O, V, S), 
+    by = "Strain"
+  ) %>%
+  select(-Morphology, -Source_variety)
+
+#View(meta_tree) Looking good
+
+### Now I will write them in a format for itols 
+
+cat("LABELS\nSEPARATOR TAB\n\nDATA\n",
+    file = "../Tables/labels.txt")
+write.table(labels_df, "../Tables/labels.txt",
+            sep = "\t", append = TRUE, row.names = FALSE,
+            col.names = FALSE, quote = FALSE)
+
+
+# Generate iTOL DATASET_SYMBOL file: Shape plot
+# The idea is to have three colored circles per strain, one per host (O, V, S) that will have different sizes depeding on how big the raw biomass is.
+# The circle size is raw biomass on that host.
+# Circle color = host (O = red, V = pinkish, S = blue).## I am using the same colors that Liz used
+# Input:  meta_tree with columns Strain, O, V, S
+# Output: itol_annotations/biomass_symbols.txt
+
+host_colors <- c(
+  "O" = "#471323",   
+  "V" = "#FCB0B3",  
+  "S" = "#ADB9E3"   
+)
+ 
+# Create the file
+
+ 
+dir.create("itol_annotations", showWarnings = FALSE)
+ 
+df <- meta_tree   # I am using df to replace meta_tree 
+ 
+
+## Build the table that will be the input in itols. 
+# DATASET_EXTERNALSHAPE expects: ID  value_field1  value_field2  value_field3
+# Sizes are scaled automatically across all values in the dataset.
+ 
+shape_df <- df[, c("Strain", "O", "V", "S")]
+shape_df
+shape_df <- shape_df[!is.na(shape_df$Strain) & nzchar(shape_df$Strain), ]
+ shape_df
+
+ outfile <- "itol_annotations/biomass_externalshape.txt"
+
+ ## Writing the file. Dataset_externalshape is important to keep them separate 
+cat(
+  "DATASET_EXTERNALSHAPE\n",
+  "SEPARATOR TAB\n",
+  "DATASET_LABEL\tShoot biomass\n",
+  "COLOR\t#000000\n",
+ 
+  # One column per host, with column headers
+  "FIELD_LABELS\tO\tV\tS\n",
+  "FIELD_COLORS\t", host_colors["O"], "\t",
+                    host_colors["V"], "\t",
+                    host_colors["S"], "\n",
+ 
+  # Shape per column: 2 = filled circle (per iTOL docs)
+  "FIELD_SHAPES\t2\t2\t2\n",
+ 
+  "SHAPE_SCALING\t1\n",        # scale shapes by value (the whole point)
+  "SHOW_VALUES\t0\n",          
+ 
+  # Visual spacing
+  "SHAPE_SPACING\t10\n",       # gap between columns
+  "HORIZONTAL_GRID\t1\n",
+  "VERTICAL_GRID\t1\n",
+ 
+  # Legend
+  "LEGEND_TITLE\tBiomass by host\n",
+  "LEGEND_SHAPES\t2\t2\t2\n",
+  "LEGEND_COLORS\t", host_colors["O"], "\t",
+                     host_colors["V"], "\t",
+                     host_colors["S"], "\n",
+  "LEGEND_LABELS\tO\tV\tS\n",
+ 
+  "\nDATA\n",
+  sep = "",
+  file = outfile
+)
+ 
+write.table(shape_df, outfile,
+            sep = "\t", append = TRUE,
+            row.names = FALSE, col.names = FALSE,
+            quote = FALSE, na = "X")
+ 
+cat("Wrote:", outfile, "\n")
+cat("Drag it onto your tree in iTOL.\n")
+cat("If circles are too big/small, adjust via the gear icon next to the dataset.\n")
+ 
+
+
+```
+
