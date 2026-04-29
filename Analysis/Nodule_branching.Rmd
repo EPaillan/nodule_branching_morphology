@@ -80,6 +80,8 @@ lm_run<- function(model, model_name, save_path=getwd()) {
 ```
 
 ```{r Function: Detecting and Listing Outliers, }
+#Maria: I think you might no longer be using the data coming out of detectview_outlier function. At least that is what I noticed with the dataframes/tables you created using them... maybe check and if you are not longer using them you can delete this chunk :)  
+
 #This function is used to detect outliers, create a list of the identified outliers.
 detectview_outlier <- function(data, variable) {
   outliers <- boxplot(data[[variable]], plot = FALSE)$out #Generates a barplot to ID outliers
@@ -99,30 +101,37 @@ detectview_outlier <- function(data, variable) {
 ```{r Data Import of Single Inoculation (ss_df), results = HIDE, warning = HIDE, collapse=TRUE}
 #Import and tidying of Data
 #setwd("~/GitHub/nodule_branching_morphology/Analysis/")
-
+getwd()
 #Setting up plot and directories to be easily found:
-plot_dir<-("../Figures/")
-table_dir<-("../Tables/")
+plot_dir<-("../Figures/") #Maria: I had to edit this to fit my directory, but if you use R.project and here() you will be able to make this more accessible for reviewers/readers. For Maria if I need to run this code again the path is /Users/mariaalejandragilpolo/Documents/GitHub/nodule_branching_morphology/Figures/
+table_dir<-("../Tables/"). # For Maria; If I need to run this code again the path is /Users/mariaalejandragilpolo/Documents/GitHub/nodule_branching_morphology/Tables/
 
 ss_df<-data.frame(fread("../data/MasterSpreadsheet_AVT.csv"))
 
+# For Maria: If I need to run the code again the path is /Users/mariaalejandragilpolo/Documents/GitHub/nodule_branching_morphology/data/MasterSpreadsheet_AVT.csv"
+
 # Removing erroneous columns in the original data frame, this includes collection notes
 ss_df <- ss_df[, !colnames(ss_df) %in% "NOTES"]
+#View(ss_df)
+#nrow(ss_df) ## The number of rows in 1481
 
 # Adding total nodule count and the proportion of branched nodules
 ss_df<-ss_df %>%
-  dplyr::select(Strain, Variety, Source_variety, Rep, Rootweight_g, Shootweight_g, Nod_lobe, Nod_unlobed)%>% #Selecting columns relevant to the analysis
+  dplyr::select(Strain, Variety, Source_variety, Rep, Rootweight_g, Shootweight_g, Nod_lobe, Nod_unlobed, Label)%>% #Selecting columns relevant to the analysis
   mutate(Nod_count=Nod_lobe+Nod_unlobed)%>% #Counting total observed nodules
   mutate(prop_lobe=Nod_lobe/Nod_count) %>% #Creating the proportion of branched nodules to nodule count
   filter_at(vars(Nod_count:prop_lobe), all_vars(!is.infinite(.)))%>% #Checking for any infinite values
   mutate(Biomass_g=Rootweight_g+Shootweight_g)%>% #Counting total host mass biomass
   dplyr::filter(!Strain %in% c("MIX", "NIG", "MC2", "EXC", "UNI"))%>%
-  drop_na() #Removing any NAs
+  drop_na() #Removing any NAs ## Maria: if you drop_na() in this part of the code, you will be eliminating samples for which you have relevant data, for example, you will eliminate 087_O_d, 110_O_b, 081_V_d, 080_O_d, etc (7 samples) for which we have shoot biomass data but we did not evaluate nodule number since so those cells have NAs in those nodule traits. There are not a lot of samples, but they could have been included in the phylogeny. Also, I don't know how important is Rootweight_g to be included as some of the traits to select() because when you do the drop_na(), it will drop 018_S_a that is a sample that although does not have rootweight it does have shoot biomass, and nodule numbers (It is the only relevant one I got to detect). I think it is important to drop the NAs when you are working with correlations, but that comes later in your pipeline. 
 
+# Using the detect outlier function to isolate them for view if needed . # Maria: I don't see Biom_outlier or Lobe_outlier being used downstream so I don't think this part should be included in the code. Are you detecting these outliers to eliminate them from the downstream analysis?
 
-# Using the detect outlier function to isolate them for view if needed 
 Biom_outlier<-detectview_outlier(ss_df,"Biomass_g")
+Biom_outlier ## Maria: It is giving me strain 020, 039, 057, 065 and 104. I am not really sure if you are filtering those values out?
 Lobe_outlier<-detectview_outlier(ss_df,"prop_lobe")
+Lobe_outlier ## Maria: It is giving me strain 009, 021, 039, 050, 080, 092, 110, 121
+
 
 #Prop_lobe.outliers<-c("110_O_a")
 #ss_df<-ss_df %>%
@@ -131,17 +140,19 @@ Lobe_outlier<-detectview_outlier(ss_df,"prop_lobe")
 # Separate data frame that is the mean of every Isolate-Host variety combination across all replicates
 Mean_lobe<-ss_df %>% 
             group_by(Strain,Variety,Source_variety)%>% 
-            dplyr::summarize(lobe_mean=mean(prop_lobe, na.rm=TRUE))
+            dplyr::summarize(lobe_mean=mean(prop_lobe, na.rm=TRUE)) ##Maria: It doesn't seem like you use this dataframe in the rest of the pipeline so you might want to consider deleting it. This is very similar to the mean_prop_lobed in chunk near line 192. 
 ```
 
 ```{r Data Import of CFU experiment (cfu_df), message=FALSE, warning=FALSE, page.print=FALSE}
 #Loading in the cfu dataset
 cfu_df<-data.frame(fread("../data/AVT_CFU_count.csv"))
-
+ ## For Maria, if I have to run the code again the path is /Users/mariaalejandragilpolo/Documents/GitHub/nodule_branching_morphology/data/AVT_CFU_count.csv
+#View(cfu_df)
 #Removing erroneous columns from the data frame like notes from the harvest, and renames one column to be easier to call into R
-cfu_df <- cfu_df %>%
+
+cfu_df <- cfu_df %>% 
   mutate(Comments=NULL)%>%
-  mutate(dilution.counted=NULL)%>%
+  mutate(dilution.counted=NULL)%>%  ## Maria: There is no need to remove this column because it is just raw data like the other counts :) Sincer you are starting with rhizobia.released.per.nodule.calculation, the raw values like dilution.counted and the raw counts are not really important because the calculation already happened in excel.
   rename(rhz_released = Lianas.rhizobia.released.per.nodule.calculation)%>% 
 #Since we had a couple of nodules that had higher than 5 branches we combined them into a 5+ category
   mutate(Nodule.lobes = ifelse(Nodule.lobes == "more than 5", "5+", 
@@ -152,23 +163,30 @@ cfu_df <- cfu_df %>%
 #Making sure the branch coulmn is considered a factor
   mutate(Nodule.lobes = as.factor(Nodule.lobes))
 
+#View(cfu_df)
+
 #Extracting sample data from the sample-ID
 cfu_df<-separate(cfu_df, Plant, into = c("Strain","Host","rep"), sep="\\.")
 
 #Ensuring intended variables are numeric and factor as intended
 cfu_df$rhz_released<-as.numeric(cfu_df$rhz_released)
 cfu_df$Nodule.area<-as.numeric(cfu_df$Nodule.area)
-cfu_df$spot.avg <- as.numeric(gsub("[^0-9.]", "", cfu_df$spot.avg))
+View(cfu_df)
+cfu_df$spot.avg <- as.numeric(gsub("[^0-9.]", "", cfu_df$spot.avg)) #Maria: I am not sure what this code is doing, but I don't think you need the spot.avg values since you are working with Lianas.rhizobia.released.per.nodule.calculation that already estimates the CFU from spot.avg and dilution. I think you can just remove this line. 
+#View(cfu_df)
 
 
 #Detecting outliers in the CFU data for view if needed (not used)
-RhzReleased_outlier<-detectview_outlier(cfu_df,"rhz_released")
+RhzReleased_outlier<-detectview_outlier(cfu_df,"rhz_released") #Maria: Similar to a previous note, I don't think you are using this information.
+RhzReleased_outlier
 Nodule.area_outlier<-detectview_outlier(cfu_df,"Nodule.area")
+Nodule.area_outlier
+
 
 #Removing 0.44.V.b.4  because of a sampling error making it a massive outlier in the nodule.area measure
 Nodule.area.outliers<-c("044.V.b.4")
 RhzReleased.outliers<-c("070.O.b.5")
-
+View(cfu_df)
 cfu_df<-cfu_df %>%
 #Removing size that was likely an error during processing
     filter(!(Ind.Label %in% RhzReleased.outliers))%>%
@@ -326,7 +344,7 @@ Figure_2_plot<- (surface_area_plot / rhzreleasedbr_plot / rhzreleased_plot)+
         panel.spacing    = unit(1.5, "mm"),
         legend.box.margin = margin(0, 0, 0, 0, unit = "pt"),
         plot.tag = element_text(size = 26, face = "bold", hjust = 6, vjust= -2))
-
+Figure_2_plot
 
 svg(filename=file.path(plot_dir,"Figure_2.svg"), width=13, height=13)
 print(Figure_2_plot)
@@ -338,6 +356,8 @@ dev.off()
 ```
 
 ##Figure 3
+
+Maria: I think there are plots here that you don't really use in the paper that the one generated with the root weight. You don't need to keep the code if it is not important for the draft :). 
 ```{r Figure 3, echo=FALSE, warning=FALSE, message=TRUE}
 #Plots generated for figure 3. Single plot exporting has been "#" out to make this knit, if an export is needed remove the "#" from the pdf() and dev.off() functions below.
 
@@ -369,7 +389,7 @@ abiomass_plot<-
 #Mean Host Root Biomass plot
 #pdf(filename=file.path(plot_dir,"Figure_3_root_biomass.pdf"), width=3, height=3)
 b.biomass_plot<- 
-  ggplot(str.host_mean_df, aes(x=mean_prop_lobe, y=mean_belmass_g, color=Variety))+
+  ggplot(str.host_mean_df, aes(x=mean_prop_lobe, y=mean_belmass_g, color=Variety))+ 
   geom_point(aes(shape=Strain) ,alpha=0.6, size=3)+
   stat_smooth(method="lm",se = FALSE)+
   scale_shape_manual(values=unlist(shape_vals), breaks = c("001", "012", "044", "059", "070", "077", "112", "117"), labels=strain_labels)+
