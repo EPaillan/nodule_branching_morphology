@@ -104,7 +104,7 @@ detectview_outlier <- function(data, variable) {
 getwd()
 #Setting up plot and directories to be easily found:
 plot_dir<-("../Figures/") #Maria: I had to edit this to fit my directory, but if you use R.project and here() you will be able to make this more accessible for reviewers/readers. For Maria if I need to run this code again the path is /Users/mariaalejandragilpolo/Documents/GitHub/nodule_branching_morphology/Figures/
-table_dir<-("../Tables/"). # For Maria; If I need to run this code again the path is /Users/mariaalejandragilpolo/Documents/GitHub/nodule_branching_morphology/Tables/
+table_dir<-("../Tables/"). # For Maria; If I need to run this code again the path is 
 
 ss_df<-data.frame(fread("../data/MasterSpreadsheet_AVT.csv"))
 
@@ -124,6 +124,16 @@ ss_df<-ss_df %>%
   mutate(Biomass_g=Rootweight_g+Shootweight_g)%>% #Counting total host mass biomass
   dplyr::filter(!Strain %in% c("MIX", "NIG", "MC2", "EXC", "UNI"))%>%
   drop_na() #Removing any NAs ## Maria: if you drop_na() in this part of the code, you will be eliminating samples for which you have relevant data, for example, you will eliminate 087_O_d, 110_O_b, 081_V_d, 080_O_d, etc (7 samples) for which we have shoot biomass data but we did not evaluate nodule number since so those cells have NAs in those nodule traits. There are not a lot of samples, but they could have been included in the phylogeny. Also, I don't know how important is Rootweight_g to be included as some of the traits to select() because when you do the drop_na(), it will drop 018_S_a that is a sample that although does not have rootweight it does have shoot biomass, and nodule numbers (It is the only relevant one I got to detect). I think it is important to drop the NAs when you are working with correlations, but that comes later in your pipeline. 
+
+ss_df$Strain <- as.character(ss_df$Strain)
+
+View(ss_df)
+
+## Maria: I will save ss_df as a table to be able to open it in the other Rdm. 
+
+write.csv(ss_df, "../Tables/ss_df.csv", row.names = FALSE) # For Maria next time to store this file: /Users/mariaalejandragilpolo/Documents/GitHub/nodule_branching_morphology/Tables/ss_df.csv
+
+
 
 # Using the detect outlier function to isolate them for view if needed . # Maria: I don't see Biom_outlier or Lobe_outlier being used downstream so I don't think this part should be included in the code. Are you detecting these outliers to eliminate them from the downstream analysis?
 
