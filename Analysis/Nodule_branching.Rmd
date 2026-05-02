@@ -20,6 +20,7 @@ library(patchwork); packageVersion("patchwork")
 library(svglite); packageVersion("svglite")
 library(performance); packageVersion("performance")
 library(data.table); packageVersion("data.table")
+library(here); packageVersion("here")
 set.seed(100)
 ```
 
@@ -49,9 +50,6 @@ nbranch_colors <- c("1" = "#273E47",
 nbranch_shapes <- c("1" = 16, "2" = 15, "3-4" = 17, "5+" = 18)
 
 #and strain ID
-strain_shapes <- modifyList(as.list(setNames(rep(16, length(unique(str.host_mean_df$Strain))),
-                   unique(str.host_mean_df$Strain))),
-                   list("001"=15, "012"=12, "044"=17, "059"=18, "070"=8, "077"=4, "112"=25, "117"=3))
 
 strain_labels <- c("001"=1, "012"=2, "044"=3, "059"=4, "070"=5, "077"=6, "112"=7, "117"=8)
 strain_shapes <- c("001"=15, "012"=24, "044"=17, "059"=18, "070"=8, "077"=4, "112"=25, "117"=3)
@@ -79,41 +77,19 @@ lm_run<- function(model, model_name, save_path=getwd()) {
 }
 ```
 
-```{r Function: Detecting and Listing Outliers, }
-#Maria: I think you might no longer be using the data coming out of detectview_outlier function. At least that is what I noticed with the dataframes/tables you created using them... maybe check and if you are not longer using them you can delete this chunk :)  
-
-#This function is used to detect outliers, create a list of the identified outliers.
-detectview_outlier <- function(data, variable) {
-  outliers <- boxplot(data[[variable]], plot = FALSE)$out #Generates a barplot to ID outliers
-  outlier_data <- data[data[[variable]] %in% outliers, ]
-  
-  outlier_plot <- ggplot(data, aes(x = 1, y = !!rlang::sym(variable))) + 
-    geom_boxplot() + 
-    geom_point(data = outlier_data, aes(x = 1, y = !!rlang::sym(variable)), color = "red") + #Makes the outlier more visible
-    labs(x = "", y = variable, title = paste("Boxplot of", variable, "outliers"))
-  
-  return(list(plot = outlier_plot, outlier_data = outlier_data)) #Provides detail about the identified outliers
-}
-```
-
 #Importing Data
 
 ```{r Data Import of Single Inoculation (ss_df), results = HIDE, warning = HIDE, collapse=TRUE}
 #Import and tidying of Data
-#setwd("~/GitHub/nodule_branching_morphology/Analysis/")
-getwd()
+here::i_am("nodule_branching_morphology/Analysis/Nodule_branching.Rmd")
+
 #Setting up plot and directories to be easily found:
-plot_dir<-("../Figures/") #Maria: I had to edit this to fit my directory, but if you use R.project and here() you will be able to make this more accessible for reviewers/readers. For Maria if I need to run this code again the path is /Users/mariaalejandragilpolo/Documents/GitHub/nodule_branching_morphology/Figures/
-table_dir<-("../Tables/"). # For Maria; If I need to run this code again the path is /Users/mariaalejandragilpolo/Documents/GitHub/nodule_branching_morphology/Tables/
-
-ss_df<-data.frame(fread("../data/MasterSpreadsheet_AVT.csv"))
-
-# For Maria: If I need to run the code again the path is /Users/mariaalejandragilpolo/Documents/GitHub/nodule_branching_morphology/data/MasterSpreadsheet_AVT.csv"
+plot_dir<- here("nodule_branching_morphology", "Figures") 
+table_dir<-here("nodule_branching_morphology", "Tables")
+ss_df<-data.frame(fread(here("nodule_branching_morphology", "Data","MasterSpreadsheet_AVT.csv")))
 
 # Removing erroneous columns in the original data frame, this includes collection notes
 ss_df <- ss_df[, !colnames(ss_df) %in% "NOTES"]
-#View(ss_df)
-#nrow(ss_df) ## The number of rows in 1481
 
 # Adding total nodule count and the proportion of branched nodules
 ss_df<-ss_df %>%
@@ -123,37 +99,20 @@ ss_df<-ss_df %>%
   filter_at(vars(Nod_count:prop_lobe), all_vars(!is.infinite(.)))%>% #Checking for any infinite values
   mutate(Biomass_g=Rootweight_g+Shootweight_g)%>% #Counting total host mass biomass
   dplyr::filter(!Strain %in% c("MIX", "NIG", "MC2", "EXC", "UNI"))%>%
-  drop_na() #Removing any NAs ## Maria: if you drop_na() in this part of the code, you will be eliminating samples for which you have relevant data, for example, you will eliminate 087_O_d, 110_O_b, 081_V_d, 080_O_d, etc (7 samples) for which we have shoot biomass data but we did not evaluate nodule number since so those cells have NAs in those nodule traits. There are not a lot of samples, but they could have been included in the phylogeny. Also, I don't know how important is Rootweight_g to be included as some of the traits to select() because when you do the drop_na(), it will drop 018_S_a that is a sample that although does not have rootweight it does have shoot biomass, and nodule numbers (It is the only relevant one I got to detect). I think it is important to drop the NAs when you are working with correlations, but that comes later in your pipeline. 
+  drop_na()
 
-# Using the detect outlier function to isolate them for view if needed . # Maria: I don't see Biom_outlier or Lobe_outlier being used downstream so I don't think this part should be included in the code. Are you detecting these outliers to eliminate them from the downstream analysis?
+# Removing sampling error
+prop_lobe.outliers<-c("110_O_a")
+ss_df<-ss_df %>%
+  dplyr::filter(!(Label %in% prop_lobe.outliers))
 
-Biom_outlier<-detectview_outlier(ss_df,"Biomass_g")
-Biom_outlier ## Maria: It is giving me strain 020, 039, 057, 065 and 104. I am not really sure if you are filtering those values out?
-Lobe_outlier<-detectview_outlier(ss_df,"prop_lobe")
-Lobe_outlier ## Maria: It is giving me strain 009, 021, 039, 050, 080, 092, 110, 121
-
-
-#Prop_lobe.outliers<-c("110_O_a")
-#ss_df<-ss_df %>%
-  dplyr::filter(!(Label %in% Prop_lobe.outliers))
-
-# Separate data frame that is the mean of every Isolate-Host variety combination across all replicates
-Mean_lobe<-ss_df %>% 
-            group_by(Strain,Variety,Source_variety)%>% 
-            dplyr::summarize(lobe_mean=mean(prop_lobe, na.rm=TRUE)) ##Maria: It doesn't seem like you use this dataframe in the rest of the pipeline so you might want to consider deleting it. This is very similar to the mean_prop_lobed in chunk near line 192. 
 ```
 
 ```{r Data Import of CFU experiment (cfu_df), message=FALSE, warning=FALSE, page.print=FALSE}
 #Loading in the cfu dataset
-cfu_df<-data.frame(fread("../data/AVT_CFU_count.csv"))
- ## For Maria, if I have to run the code again the path is /Users/mariaalejandragilpolo/Documents/GitHub/nodule_branching_morphology/data/AVT_CFU_count.csv
-#View(cfu_df)
-#Removing erroneous columns from the data frame like notes from the harvest, and renames one column to be easier to call into R
+cfu_df<-data.frame(fread(here("nodule_branching_morphology","Data","AVT_CFU_count.csv")))
 
 cfu_df <- cfu_df %>% 
-  mutate(Comments=NULL)%>%
-  mutate(dilution.counted=NULL)%>%  ## Maria: There is no need to remove this column because it is just raw data like the other counts :) Sincer you are starting with rhizobia.released.per.nodule.calculation, the raw values like dilution.counted and the raw counts are not really important because the calculation already happened in excel.
-  rename(rhz_released = Lianas.rhizobia.released.per.nodule.calculation)%>% 
 #Since we had a couple of nodules that had higher than 5 branches we combined them into a 5+ category
   mutate(Nodule.lobes = ifelse(Nodule.lobes == "more than 5", "5+", 
                         ifelse(Nodule.lobes == "More than 5", "5+",
@@ -163,30 +122,17 @@ cfu_df <- cfu_df %>%
 #Making sure the branch coulmn is considered a factor
   mutate(Nodule.lobes = as.factor(Nodule.lobes))
 
-#View(cfu_df)
-
 #Extracting sample data from the sample-ID
 cfu_df<-separate(cfu_df, Plant, into = c("Strain","Host","rep"), sep="\\.")
 
 #Ensuring intended variables are numeric and factor as intended
 cfu_df$rhz_released<-as.numeric(cfu_df$rhz_released)
 cfu_df$Nodule.area<-as.numeric(cfu_df$Nodule.area)
-View(cfu_df)
-cfu_df$spot.avg <- as.numeric(gsub("[^0-9.]", "", cfu_df$spot.avg)) #Maria: I am not sure what this code is doing, but I don't think you need the spot.avg values since you are working with Lianas.rhizobia.released.per.nodule.calculation that already estimates the CFU from spot.avg and dilution. I think you can just remove this line. 
-#View(cfu_df)
 
-
-#Detecting outliers in the CFU data for view if needed (not used)
-RhzReleased_outlier<-detectview_outlier(cfu_df,"rhz_released") #Maria: Similar to a previous note, I don't think you are using this information.
-RhzReleased_outlier
-Nodule.area_outlier<-detectview_outlier(cfu_df,"Nodule.area")
-Nodule.area_outlier
-
-
-#Removing 0.44.V.b.4  because of a sampling error making it a massive outlier in the nodule.area measure
+#Removing 0.44.V.b.4 & 070.O.b.5  because of a sampling error making it a massive outlier in the nodule.area measure
 Nodule.area.outliers<-c("044.V.b.4")
 RhzReleased.outliers<-c("070.O.b.5")
-View(cfu_df)
+
 cfu_df<-cfu_df %>%
 #Removing size that was likely an error during processing
     filter(!(Ind.Label %in% RhzReleased.outliers))%>%
@@ -219,7 +165,7 @@ str.host_mean_df <- ss_df %>%
 nodarea<-lm(log10(Nodule.area)~Nodule.lobes*Host*Strain+rep, data=cfu_df)
 nodarea.results<-lm_run(nodarea, model_name="nodarea")
 aov.nodarea<-anova(nodarea)
-write.csv(aov.nodarea, file=paste(table_dir,"Nodule-Area-response_anova.csv"))
+write.csv(aov.nodarea, file=file.path(table_dir, "Nodule-Area-response_anova.csv"))
 aov.nodarea
 aov.nodarea[["Sum Sq"]] / sum(aov.nodarea[["Sum Sq"]])
 
@@ -227,7 +173,7 @@ aov.nodarea[["Sum Sq"]] / sum(aov.nodarea[["Sum Sq"]])
 rhz_released<-lm(log10(rhz_released)~Nodule.lobes*Host+as.factor(Strain)+rep, data=cfu_df)
 rhz_released.results<-lm_run(rhz_released, "rhzreleased")
 aov.rhzreleased<- anova(rhz_released)
-write.csv(aov.rhzreleased, file=paste(table_dir,"RhizobiaReleased-response_anova.csv"))
+write.csv(aov.rhzreleased, file=file.path(table_dir,"RhizobiaReleased-response_anova.csv"))
 aov.rhzreleased
 aov.rhzreleased[["Sum Sq"]] / sum(aov.rhzreleased[["Sum Sq"]])
 
@@ -235,7 +181,7 @@ aov.rhzreleased[["Sum Sq"]] / sum(aov.rhzreleased[["Sum Sq"]])
 rhztestarea<-lm(log10(rhz_released)~Nodule.area*Nodule.lobes+Host+Strain+rep, data=cfu_df)
 rhztestarea.results<-lm_run(rhztestarea,"rhzarea")
 aov.rhztestarea<- anova(rhztestarea)
-write.csv(aov.rhztestarea, file=paste(table_dir,"Nodulearea-by-surfacearea_anova.csv"))
+write.csv(aov.rhztestarea, file=file.path(table_dir,"Nodulearea-by-surfacearea_anova.csv"))
 aov.rhztestarea
 aov.rhztestarea[["Sum Sq"]] / sum(aov.rhztestarea[["Sum Sq"]])
 ```
@@ -247,7 +193,7 @@ aov.rhztestarea[["Sum Sq"]] / sum(aov.rhztestarea[["Sum Sq"]])
 nodnumber<-lm(mean_nod_num~mean_prop_lobe*Variety+Strain,data=str.host_mean_df)
 nodnum.results<-lm_run(nodnumber, "nodnum")
 aov.nodnum<-anova(nodnumber)
-write.csv(aov.nodnum, file=paste(table_dir,"Nodulenumber-response_anova.csv"))
+write.csv(aov.nodnum, file=file.path(table_dir,"Nodulenumber-response_anova.csv"))
 aov.nodnum
 aov.nodnum[["Sum Sq"]] / sum(aov.nodnum[["Sum Sq"]])
 
@@ -255,7 +201,7 @@ aov.nodnum[["Sum Sq"]] / sum(aov.nodnum[["Sum Sq"]])
 biomass<-lm(mean_biomass_g~mean_prop_lobe*Variety+Strain,data=str.host_mean_df)
 biomass.results<-lm_run(biomass, "biomass")
 aov.biomass<-anova(biomass)
-write.csv(aov.biomass, file=paste(table_dir,"Biomass-response_anova.csv"))
+write.csv(aov.biomass, file=file.path(table_dir,"Biomass-response_anova.csv"))
 aov.biomass
 aov.biomass[["Sum Sq"]] / sum(aov.biomass[["Sum Sq"]])
 
@@ -263,7 +209,7 @@ aov.biomass[["Sum Sq"]] / sum(aov.biomass[["Sum Sq"]])
 propbr<- lm(prop_lobe ~ Variety*Strain+Rep,data=ss_df)
 propbr.results<- lm_run(propbr,"meanbranch")
 aov.propbr<-anova(propbr)
-write.csv(aov.propbr, file=paste(table_dir,"proplobe-response_anova.csv"))
+write.csv(aov.propbr, file=file.path(table_dir,"proplobe-response_anova.csv"))
 aov.propbr
 aov.propbr[["Sum Sq"]] / sum(aov.propbr[["Sum Sq"]])
 
@@ -273,7 +219,7 @@ aov.propbr[["Sum Sq"]] / sum(aov.propbr[["Sum Sq"]])
 a.biomass<-lm(mean_abvmass_g~mean_prop_lobe*Variety+Strain,data=str.host_mean_df)
 a.biomass.results<-lm_run(a.biomass, "biomass")
 aov.a.biomass<-anova(a.biomass)
-write.csv(aov.a.biomass, file=paste(table_dir,"Abovebround-biomass-response_anova.csv"))
+write.csv(aov.a.biomass, file=file.path(table_dir,"Abovebround-biomass-response_anova.csv"))
 aov.a.biomass
 aov.a.biomass[["Sum Sq"]] / sum(aov.a.biomass[["Sum Sq"]])
 
@@ -281,7 +227,7 @@ aov.a.biomass[["Sum Sq"]] / sum(aov.a.biomass[["Sum Sq"]])
 b.biomass<-lm(mean_belmass_g~mean_prop_lobe*Variety+Strain,data=str.host_mean_df)
 b.biomass.results<-lm_run(b.biomass, "Belowground biomass")
 aov.b.biomass<-anova(b.biomass)
-write.csv(aov.b.biomass, file=paste(table_dir,"Belowground-biomass-response_anova.csv"))
+write.csv(aov.b.biomass, file=file.path(table_dir,"Belowground-biomass-response_anova.csv"))
 aov.b.biomass
 aov.b.biomass[["Sum Sq"]] / sum(aov.b.biomass[["Sum Sq"]])
 ```
@@ -291,68 +237,69 @@ aov.b.biomass[["Sum Sq"]] / sum(aov.b.biomass[["Sum Sq"]])
 ```{r Figure 2, echo=FALSE, warning=FALSE, message=TRUE}
 #Single plot exporting has been "#" out to make this knit, if an export is needed removing the "#" from the pdf() and dev.off() below.
 
-pdf(file=file.path(plot_dir,"Figure_2_surfacearea.pdf"), width=3, height=3)
+#pdf(file=file.path(plot_dir,"Figure_2_surfacearea.pdf"), width=3, height=3)
 surface_area_plot<- 
   ggplot(cfu_df, aes(x=Nodule.lobes, y=Nodule.area, color=Nodule.lobes, shape=Strain))+
   geom_jitter(aes(shape=Strain),width=0.2, size=3)+
   scale_size_manual(values=c(2.5))+
-  geom_smooth(aes(group=Host),method = "lm", se=FALSE, color="black")+
-  labs(x="", y="Nodule Surface Area(cm2)", shape="Strain", color="Number of\nNodule\nBranches")+
+  geom_smooth(aes(group=Host),method = "lm", se=FALSE, color="black", show.legend = FALSE)+
+  labs(x="", y="Nodule Surface Area(cm2)", shape="Strain", color="Number of Nodule Branches")+
   scale_color_manual(values=nbranch_colors, labels=nbranch_labels)+
   scale_shape_manual(values = strain_shapes, labels=strain_labels)+
   facet_wrap(~ Host, ncol = 3, labeller = labeller(Host = host_labels))+
+  guides(size = "none",
+         color = guide_legend(nrow = 1),
+         shape = guide_legend(nrow = 1)) +
   plot_theme()
-dev.off()
+#dev.off()
 
-pdf(file=file.path(plot_dir,"Figure_2_released_rhizobia_branch.pdf"), width=3, height=3)
+#pdf(file=file.path(plot_dir,"Figure_2_released_rhizobia_branch.pdf"), width=3, height=3)
 rhzreleasedbr_plot <- 
   ggplot(cfu_df, aes(x=Nodule.lobes, y=rhz_released, color=Nodule.lobes, shape=Strain))+
   geom_jitter(aes(shape=Strain),width=0.2, size=3)+
   scale_size_manual(values=c(2.5))+
-  geom_smooth(aes(group=Host),method = "lm", se=FALSE, color="black")+
+  geom_smooth(aes(group=Host),method = "lm", se=FALSE, color="black", show.legend = FALSE)+
   scale_y_log10()+
-  labs(x= "Number of Nodule Branches", y="CFU/Nodule", shape="Strain", color="Host Variety")+
+  labs(x= "Number of Nodule Branches", y="CFU/Nodule", shape="Strain", color="Number of Nodule Branches")+
   scale_color_manual(values=nbranch_colors, labels=nbranch_labels)+
   scale_shape_manual(values = strain_shapes, labels=strain_labels)+
   facet_wrap(~ Host, ncol = 3, labeller = labeller(Host = host_labels))+
-  plot_theme()+
-  theme(legend.position = "none")
-  
-dev.off()
+  guides(size = "none",
+         color = guide_legend(nrow = 1),
+         shape = guide_legend(nrow = 1)) +
+  plot_theme()
+#dev.off()
 
-pdf(file=file.path(plot_dir,"Figure_2_released_rhizobia_branch_ver5.pdf"), width=3, height=3)
+#pdf(file=file.path(plot_dir,"Figure_2_released_rhizobia_branch_ver5.pdf"), width=3, height=3)
 rhzreleased_plot<-
   ggplot(cfu_df, aes(x = Nodule.area, y = rhz_released, color = Nodule.lobes)) +
   geom_point(size=3)+
-  stat_smooth(method = "loess", span=10, se=FALSE) +
+  stat_smooth(method = "loess", span=10, se=FALSE, show.legend = FALSE) +
   scale_y_log10()+
 scale_color_manual(values=nbranch_colors, labels=nbranch_labels)+
-  labs(x = "Nodule Surface Area(cm2)", y = "CFU/Nodule")+
+  labs(x = "Nodule Surface Area(cm2)", y = "CFU/Nodule", shape="Strain", color="Number of Nodule Branches")+
     facet_wrap(~ Host, nrow = 3, labeller = labeller(Host = host_labels))+
-  plot_theme()+
-  theme(legend.position = "none")
-
-dev.off()
+  guides(shape="none", size="none")+ 
+  plot_theme()
+#dev.off()
 
 
 #Grid format of Figure 2
 Figure_2_plot<- (surface_area_plot / rhzreleasedbr_plot / rhzreleased_plot)+
   plot_layout(guides="collect", heights=c(1,1,1.75)) + 
-  theme(legend.position = "right")+
   plot_annotation(tag_levels = "A") &
-  theme(plot.margin= unit(c(0.5, 0.5, 0.5, 0.5), "pt"),
+  theme(legend.position = "bottom",
+        legend.direction = "horizontal",
+        legend.box = "vertical",
+        plot.margin= unit(c(0.5, 0.5, 0.5, 0.5), "pt"),
         panel.spacing    = unit(1.5, "mm"),
-        legend.box.margin = margin(0, 0, 0, 0, unit = "pt"),
         plot.tag = element_text(size = 26, face = "bold", hjust = 6, vjust= -2))
 Figure_2_plot
 
-svg(filename=file.path(plot_dir,"Figure_2.svg"), width=13, height=13)
+svg(filename=file.path(plot_dir,"Figure_2.svg"), width=8, height=13)
 print(Figure_2_plot)
 dev.off()
 
-pdf(file=file.path(plot_dir,"Figure_2_ver6.pdf"),width=10, height=14)
-print(Figure_2_plot)
-dev.off()
 ```
 
 ##Figure 3
@@ -377,9 +324,8 @@ ggplot(str.host_mean_df, aes(x=mean_prop_lobe, y=mean_biomass_g, color=Variety))
 #pdf(filename=file.path(plot_dir,"Figure_3_shoot_biomass.pdf"), width=3, height=3)
 abiomass_plot<- 
   ggplot(str.host_mean_df, aes(x=mean_prop_lobe, y=mean_abvmass_g, color=Variety))+
-  geom_point(aes(shape=Strain),alpha=0.6, size=3)+
+  geom_point(alpha=0.6, size=3)+
   stat_smooth(method="lm",se = FALSE)+
-  scale_shape_manual(values=unlist(shape_vals), breaks = c("001", "012", "044", "059", "070", "077", "112", "117"), labels=strain_labels)+
   labs(x="", y="Mean Host\nShoot Biomass (g)",
        color= "Host Variety")+
   scale_color_manual(values =c("O"="#471323", "S"="#ADB9E3", "V"="#FCB0B3"))+
@@ -390,9 +336,8 @@ abiomass_plot<-
 #pdf(filename=file.path(plot_dir,"Figure_3_root_biomass.pdf"), width=3, height=3)
 b.biomass_plot<- 
   ggplot(str.host_mean_df, aes(x=mean_prop_lobe, y=mean_belmass_g, color=Variety))+ 
-  geom_point(aes(shape=Strain) ,alpha=0.6, size=3)+
+  geom_point(alpha=0.6, size=3)+
   stat_smooth(method="lm",se = FALSE)+
-  scale_shape_manual(values=unlist(shape_vals), breaks = c("001", "012", "044", "059", "070", "077", "112", "117"), labels=strain_labels)+
   labs(x="Mean Proportion of Branched Nodules ", y="Mean Host\nRoot Biomass (g)",
        color= "Host Variety")+
   scale_color_manual(values =c("O"="#471323", "S"="#ADB9E3", "V"="#FCB0B3"))+
@@ -403,9 +348,8 @@ b.biomass_plot<-
 #pdf(filename=file.path(plot_dir,"Figure_3_nodulecount.pdf"), width=3, height=3)
 nodulecount_plot<- 
   ggplot(str.host_mean_df, aes(x=mean_prop_lobe, y=mean_nod_num, color=Variety))+
-  geom_point(aes(shape=Strain), alpha=0.6, size=3)+
+  geom_point(alpha=0.6, size=3)+
   stat_smooth(method="lm",se = FALSE)+
-  scale_shape_manual(values=unlist(shape_vals), breaks = c("001", "012", "044", "059", "070", "077", "112", "117"), labels=strain_labels)+
   labs(y="Mean Nodule Count", x="Mean Proportion of Branched Nodules",
        color= "Host Variety")+
   scale_color_manual(values =c("O"="#471323", "S"="#ADB9E3", "V"="#FCB0B3"))+
@@ -417,8 +361,7 @@ nodulecount_plot<-
 proplobe_plot<-
   ggplot(str.host_mean_df, aes(x=Variety, y=mean_prop_lobe, group=Strain, color=Variety))+
   geom_line(color="gray",linewidth=1, alpha=0.3, show.legend = FALSE)+
-  geom_jitter(aes(shape=Strain),alpha=0.7, width=0.25, size=3, show.legend = FALSE)+
-  scale_shape_manual(values=unlist(shape_vals), breaks = c("001", "012", "044", "059", "070", "077", "112", "117"), labels=strain_labels)+
+  geom_jitter(alpha=0.7, width=0.25, size=3, show.legend = FALSE)+
   labs(x="Alfalfa Host Variety", y="Mean Proportion of\nBranched Nodules")+
   scale_color_manual(values =c("O"="#471323", "S"="#ADB9E3", "V"="#FCB0B3"))+
     plot_theme()
@@ -429,17 +372,19 @@ fi3panelA<- abiomass_plot + b.biomass_plot + plot_layout(ncol=2)
 
 fig_3_plot <- fi3panelA  + nodulecount_plot + proplobe_plot +
   plot_layout(guides = "collect") + plot_annotation(tag_levels = "A") &
-  theme(legend.position = "bottom", plot.tag = element_text(size = 26, face = "bold", hjust = 0.2, vjust = -4)) 
+  theme(legend.position = "bottom", 
+        legend.direction = "horizontal",
+        legend.box = "vertical",
+        plot.margin= unit(c(0.5, 0.5, 0.5, 0.5), "pt"),
+        plot.tag = element_text(size = 26, face = "bold", hjust = 0.2, vjust = -4)) 
+fig_3_plot
 
 
-svg(filename=file.path(plot_dir,"Figure_3.svg"), width=13, height=13)
+
+svg(filename=file.path(plot_dir,"Figure_3.svg"), width=10, height=10)
 print(fig_3_plot)
 dev.off()
 
-#Doesnt have the fixed axes label and "other" label in legend
-pdf(file=file.path(plot_dir,"Figure_3.pdf"), width=10, height=10)
-print(fig_3_plot)
-dev.off()
 ```
 
 #Supplemental
@@ -477,6 +422,6 @@ tab.s1 <- data.frame(dataset="rhztestarea", model="log10(rhz_released)~Nodule.ar
                      Fstat=round(aov.rhztestarea$`F value`,2),
                      Pvalue=aov.rhztestarea$`Pr(>F)`)
 supplement_table <- rbind(tab.1a, tab.1b, tab.2a, tab.2c,tab.2z, tab.s1)
-write.csv(supplement_table, file=paste0(table_dir, "Supplement_table1.csv"))
+write.csv(supplement_table, file=file.path(table_dir, "Supplement_table.csv"))
 
 ```
