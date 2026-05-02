@@ -101,6 +101,7 @@ ss_df<-ss_df %>%
   dplyr::filter(!Strain %in% c("MIX", "NIG", "MC2", "EXC", "UNI"))%>%
   drop_na()
 
+
 # Removing sampling error
 prop_lobe.outliers<-c("110_O_a")
 ss_df<-ss_df %>%
